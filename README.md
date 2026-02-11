@@ -1,7 +1,5 @@
 # MLIR Softmax Backend (C++ / MLIR / LLVM / PTX / CUDA Driver)
 
-End-to-end ML compiler backend project for **GPU kernel development** and **ML compiler** roles.
-
 This project takes a Softmax-style MLIR program and runs a full backend pipeline:
 
 `MLIR input -> custom MLIR optimization -> LLVM dialect -> LLVM IR -> PTX -> CUDA Driver launch`
