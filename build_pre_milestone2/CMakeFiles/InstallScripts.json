@@ -1,0 +1,13 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/mihirwaknis/Documents/GitHub/projectnamehere/build/cmake_install.cmake",
+		"/Users/mihirwaknis/Documents/GitHub/projectnamehere/build/lib/cmake_install.cmake",
+		"/Users/mihirwaknis/Documents/GitHub/projectnamehere/build/lib/Passes/cmake_install.cmake",
+		"/Users/mihirwaknis/Documents/GitHub/projectnamehere/build/tools/cmake_install.cmake",
+		"/Users/mihirwaknis/Documents/GitHub/projectnamehere/build/tools/mlc-opt/cmake_install.cmake",
+		"/Users/mihirwaknis/Documents/GitHub/projectnamehere/build/tools/mlc-bench/cmake_install.cmake",
+		"/Users/mihirwaknis/Documents/GitHub/projectnamehere/build/test/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
