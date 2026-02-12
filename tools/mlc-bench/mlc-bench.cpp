@@ -1,13 +1,21 @@
 #include "mlc/Passes.h"
 
+#if __has_include("mlir/Dialect/Arith/IR/Arith.h")
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#else
+#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
+#endif
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/DialectRegistry.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OwningOpRef.h"
+#if __has_include("mlir/Parser/Parser.h")
 #include "mlir/Parser/Parser.h"
+#else
+#include "mlir/Parser.h"
+#endif
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/LogicalResult.h"
 #include "llvm/ADT/SmallVector.h"
@@ -105,7 +113,7 @@ int main(int argc, char **argv) {
   llvm::cl::ParseCommandLineOptions(argc, argv, "MLC pass benchmark\n");
 
   mlir::DialectRegistry registry;
-  registry.insert<mlir::arith::ArithDialect, mlir::func::FuncDialect,
+  registry.insert<mlir::arith::ArithmeticDialect, mlir::func::FuncDialect,
                   mlir::scf::SCFDialect>();
   mlir::MLIRContext context(registry);
 

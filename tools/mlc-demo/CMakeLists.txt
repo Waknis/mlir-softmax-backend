@@ -14,16 +14,14 @@ target_link_libraries(mlc-demo
     MLCSoftmaxPasses
     MLCRuntime
     MLIROptLib
-    MLIRArithToLLVM
+    MLIRArithmeticToLLVM
     MLIRControlFlowToLLVM
     MLIRFuncToLLVM
-    MLIRIndexToLLVM
     MLIRReconcileUnrealizedCasts
     MLIRSCFToControlFlow
     MLIRTargetLLVMIRExport
     MLIRToLLVMIRTranslationRegistration
     MLIRLLVMToLLVMIRTranslation
-    MLIRBuiltinToLLVMIRTranslation
     MLIRParser
     MLIRSupport
 )

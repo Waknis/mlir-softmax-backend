@@ -9,7 +9,7 @@ target_include_directories(MLCSoftmaxPasses
 
 target_link_libraries(MLCSoftmaxPasses
   PUBLIC
-    MLIRArithDialect
+    MLIRArithmeticDialect
     MLIRFuncDialect
     MLIRIR
     MLIRPass

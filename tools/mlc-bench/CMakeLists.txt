@@ -10,7 +10,7 @@ target_include_directories(mlc-bench-pass
 target_link_libraries(mlc-bench-pass
   PRIVATE
     MLCSoftmaxPasses
-    MLIRArithDialect
+    MLIRArithmeticDialect
     MLIRFuncDialect
     MLIRIR
     MLIRParser

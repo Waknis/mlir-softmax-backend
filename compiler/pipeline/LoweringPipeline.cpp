@@ -5,7 +5,11 @@
 #include "mlir/Conversion/Passes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/OwningOpRef.h"
+#if __has_include("mlir/Parser/Parser.h")
 #include "mlir/Parser/Parser.h"
+#else
+#include "mlir/Parser.h"
+#endif
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Target/LLVMIR/Export.h"
 #include "mlir/Transforms/Passes.h"
@@ -14,12 +18,13 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Program.h"
 #include "llvm/Support/SourceMgr.h"
-#include "llvm/TargetParser/Triple.h"
+#include "llvm/ADT/Triple.h"
 
 #include <memory>
 #include <optional>
@@ -86,13 +91,14 @@ static mlir::LogicalResult runLowerToLlvmDialectStage(mlir::MLIRContext &context
                                                       mlir::ModuleOp module,
                                                       llvm::raw_ostream &log) {
   mlir::PassManager pm(&context);
+  // Keep this sequence stable for LLVM/MLIR 15: func conversion must run
+  // before cf/arith conversion to avoid SCF/CF block argument type mismatches.
   pm.addPass(mlir::createCanonicalizerPass());
   pm.addPass(mlir::createCSEPass());
-  pm.addPass(mlir::createSCFToControlFlowPass());
-  pm.addPass(mlir::createArithToLLVMConversionPass());
-  pm.addPass(mlir::createConvertIndexToLLVMPass());
-  pm.addPass(mlir::createConvertControlFlowToLLVMPass());
+  pm.addPass(mlir::createConvertSCFToCFPass());
   pm.addPass(mlir::createConvertFuncToLLVMPass());
+  pm.addPass(mlir::cf::createConvertControlFlowToLLVMPass());
+  pm.addPass(mlir::arith::createConvertArithmeticToLLVMPass());
   pm.addPass(mlir::createReconcileUnrealizedCastsPass());
 
   if (mlir::failed(pm.run(module))) {
@@ -164,7 +170,9 @@ static mlir::LogicalResult writeLlvmIrFile(mlir::ModuleOp module,
     return mlir::failure();
   }
 
-  llvmModule->setTargetTriple(llvm::Triple("nvptx64-nvidia-cuda"));
+  llvmModule->setTargetTriple("nvptx64-nvidia-cuda");
+  // PTX JIT under WSL rejects debug sections for older PTX ISA versions.
+  llvm::StripDebugInfo(*llvmModule);
 
   if (mlir::failed(injectKernelWrapper(*llvmModule, log))) {
     return mlir::failure();
@@ -188,9 +196,19 @@ static std::string resolveLlcPath(llvm::StringRef explicitPath) {
     return *llcFromPath;
   }
 
+  llvm::ErrorOr<std::string> llc15FromPath = llvm::sys::findProgramByName("llc-15");
+  if (llc15FromPath) {
+    return *llc15FromPath;
+  }
+
   const char *homebrewLLC = "/opt/homebrew/opt/llvm/bin/llc";
   if (llvm::sys::fs::exists(homebrewLLC)) {
     return std::string(homebrewLLC);
+  }
+
+  const char *llvm15Llc = "/usr/lib/llvm-15/bin/llc";
+  if (llvm::sys::fs::exists(llvm15Llc)) {
+    return std::string(llvm15Llc);
   }
 
   return std::string();
@@ -223,7 +241,7 @@ static mlir::LogicalResult emitPtxWithLlc(llvm::StringRef llcPath,
 
   std::string errMsg;
   bool executionFailed = false;
-  int rc = llvm::sys::ExecuteAndWait(llcPath, argv, std::nullopt, {}, 0, 0,
+  int rc = llvm::sys::ExecuteAndWait(llcPath, argv, llvm::None, {}, 0, 0,
                                      &errMsg, &executionFailed);
   if (executionFailed || rc != 0) {
     log << "llc failed while emitting PTX (exit=" << rc << ").\n";

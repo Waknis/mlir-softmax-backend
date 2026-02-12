@@ -13,16 +13,14 @@ target_link_libraries(mlc-driver
   PRIVATE
     MLCSoftmaxPasses
     MLIROptLib
-    MLIRArithToLLVM
+    MLIRArithmeticToLLVM
     MLIRControlFlowToLLVM
     MLIRFuncToLLVM
-    MLIRIndexToLLVM
     MLIRReconcileUnrealizedCasts
     MLIRSCFToControlFlow
     MLIRTargetLLVMIRExport
     MLIRToLLVMIRTranslationRegistration
     MLIRLLVMToLLVMIRTranslation
-    MLIRBuiltinToLLVMIRTranslation
     MLIRParser
     MLIRSupport
 )

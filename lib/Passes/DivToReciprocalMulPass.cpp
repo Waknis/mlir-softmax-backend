@@ -1,6 +1,10 @@
 #include "mlc/Passes.h"
 
+#if __has_include("mlir/Dialect/Arith/IR/Arith.h")
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#else
+#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
+#endif
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -33,7 +37,7 @@ class DivToReciprocalMulPass
   }
 
   void getDependentDialects(mlir::DialectRegistry &registry) const final {
-    registry.insert<mlir::arith::ArithDialect, mlir::scf::SCFDialect>();
+    registry.insert<mlir::arith::ArithmeticDialect, mlir::scf::SCFDialect>();
   }
 
   void runOnOperation() final {
@@ -47,7 +51,7 @@ class DivToReciprocalMulPass
 
     forOp.getBody()->walk([&](mlir::arith::DivFOp divOp) {
       mlir::Value denom = divOp.getRhs();
-      if (!mlir::isa<mlir::FloatType>(denom.getType())) {
+      if (!denom.getType().isa<mlir::FloatType>()) {
         return;
       }
       if (!forOp.isDefinedOutsideOfLoop(denom)) {
@@ -68,7 +72,7 @@ class DivToReciprocalMulPass
         continue;
       }
 
-      auto floatType = mlir::dyn_cast<mlir::FloatType>(denom.getType());
+      auto floatType = denom.getType().dyn_cast<mlir::FloatType>();
       if (!floatType) {
         continue;
       }
