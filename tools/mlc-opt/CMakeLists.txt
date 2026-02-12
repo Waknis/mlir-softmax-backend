@@ -10,7 +10,7 @@ target_include_directories(mlc-opt
 target_link_libraries(mlc-opt
   PRIVATE
     MLCSoftmaxPasses
-    MLIRArithDialect
+    MLIRArithmeticDialect
     MLIRFuncDialect
     MLIRMemRefDialect
     MLIROptLib

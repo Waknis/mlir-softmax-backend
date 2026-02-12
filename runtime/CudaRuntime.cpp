@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstring>
 #include <dlfcn.h>
+#include <array>
 #include <string>
 
 namespace mlc {
@@ -239,10 +240,48 @@ bool CudaRuntime::loadModuleFromPtx(const std::string &ptxText,
     impl_->module = nullptr;
   }
 
-  CUresult rc = impl_->cuModuleLoadDataEx(&impl_->module, ptxText.c_str(), 0,
-                                          nullptr, nullptr);
+  enum CuJitOption {
+    kCuJitInfoLogBuffer = 3,
+    kCuJitInfoLogBufferSizeBytes = 4,
+    kCuJitErrorLogBuffer = 5,
+    kCuJitErrorLogBufferSizeBytes = 6,
+  };
+
+  std::array<char, 8192> infoLog{};
+  std::array<char, 8192> errorLog{};
+  auto infoLogSizeValue = static_cast<std::uintptr_t>(infoLog.size());
+  auto errorLogSizeValue = static_cast<std::uintptr_t>(errorLog.size());
+
+  std::array<int, 4> options = {
+      kCuJitErrorLogBuffer,
+      kCuJitErrorLogBufferSizeBytes,
+      kCuJitInfoLogBuffer,
+      kCuJitInfoLogBufferSizeBytes,
+  };
+  // CUDA driver API expects size options as integer values cast to void*,
+  // not pointers to host-side variables.
+  std::array<void *, 4> optionValues = {
+      errorLog.data(),
+      reinterpret_cast<void *>(errorLogSizeValue),
+      infoLog.data(),
+      reinterpret_cast<void *>(infoLogSizeValue),
+  };
+
+  CUresult rc = impl_->cuModuleLoadDataEx(&impl_->module,
+                                          ptxText.c_str(),
+                                          static_cast<unsigned int>(options.size()),
+                                          options.data(),
+                                          optionValues.data());
   if (rc != kCudaSuccess) {
     error = "cuModuleLoadDataEx failed: " + impl_->lastError(rc);
+    if (!errorLog.empty() && errorLog.front() != '\0') {
+      error += "\nPTX JIT error log:\n";
+      error += errorLog.data();
+    }
+    if (!infoLog.empty() && infoLog.front() != '\0') {
+      error += "\nPTX JIT info log:\n";
+      error += infoLog.data();
+    }
     return false;
   }
 
