@@ -1,7 +1,7 @@
 # Removing Personal Identifiable Information (PII) from Git History
 
 ## Issue
-This repository contains personal identifiable information (PII) in the git commit history, specifically in commit author names and email addresses.
+This repository's git commit history contains personal identifiable information (PII) in commit author names and email addresses.
 
 ## Why PII Cannot Be Completely Removed Automatically
 
@@ -33,8 +33,8 @@ Since automated agents cannot perform force pushes, this PR documents the issue 
 
 # Create a mailmap file (not committed)
 cat > /tmp/mailmap << 'EOF'
-Anonymous Contributor <noreply@github.com> <mihirwaknis282@gmail.com>
-Anonymous Contributor <noreply@github.com> Waknis <mihirwaknis282@gmail.com>
+Anonymous Contributor <noreply@github.com> <OLD_EMAIL>
+Anonymous Contributor <noreply@github.com> OLD_NAME <OLD_EMAIL>
 EOF
 
 # Filter the repository
@@ -49,11 +49,11 @@ git push --force --tags
 
 ```bash
 git filter-branch --env-filter '
-if [ "$GIT_AUTHOR_EMAIL" = "mihirwaknis282@gmail.com" ]; then
+if [ "$GIT_AUTHOR_EMAIL" = "OLD_EMAIL" ]; then
     export GIT_AUTHOR_NAME="Anonymous Contributor"
     export GIT_AUTHOR_EMAIL="noreply@github.com"
 fi
-if [ "$GIT_COMMITTER_EMAIL" = "mihirwaknis282@gmail.com" ]; then
+if [ "$GIT_COMMITTER_EMAIL" = "OLD_EMAIL" ]; then
     export GIT_COMMITTER_NAME="Anonymous Contributor"
     export GIT_COMMITTER_EMAIL="noreply@github.com"
 fi
@@ -77,7 +77,7 @@ If you don't want to rewrite history, you can add a `.mailmap` file to anonymize
 
 ```
 # .mailmap
-Anonymous Contributor <noreply@github.com> Waknis <mihirwaknis282@gmail.com>
+Anonymous Contributor <noreply@github.com> OLD_NAME <OLD_EMAIL>
 ```
 
 This approach:
