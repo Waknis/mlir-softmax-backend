@@ -1,0 +1,5 @@
+# .mailmap - Maps old identities to new anonymized identities
+# Format: Proper Name <commit@email.xx> Old Name <old@email.xx>
+
+# Anonymize personal email address
+Anonymous Contributor <noreply@github.com> Waknis <mihirwaknis282@gmail.com>
