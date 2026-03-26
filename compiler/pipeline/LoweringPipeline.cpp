@@ -2,6 +2,7 @@
 
 #include "mlc/Passes.h"
 
+#include "mlir/Conversion/MemRefToLLVM/MemRefToLLVM.h"
 #include "mlir/Conversion/Passes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/OwningOpRef.h"
@@ -99,6 +100,7 @@ static mlir::LogicalResult runLowerToLlvmDialectStage(mlir::MLIRContext &context
   pm.addPass(mlir::createConvertFuncToLLVMPass());
   pm.addPass(mlir::cf::createConvertControlFlowToLLVMPass());
   pm.addPass(mlir::arith::createConvertArithmeticToLLVMPass());
+  pm.addPass(mlir::createFinalizeMemRefToLLVMConversionPass());
   pm.addPass(mlir::createReconcileUnrealizedCastsPass());
 
   if (mlir::failed(pm.run(module))) {
@@ -116,47 +118,109 @@ static mlir::LogicalResult injectKernelWrapper(llvm::Module &llvmModule,
     return mlir::failure();
   }
 
-  if (softmaxFn->arg_size() != 1 || !softmaxFn->getReturnType()->isFloatTy() ||
-      !softmaxFn->getArg(0)->getType()->isFloatTy()) {
-    log << "Function 'softmax_norm' must have signature float(float).\n";
-    return mlir::failure();
-  }
-
   if (llvm::Function *existing = llvmModule.getFunction("softmax_kernel")) {
     existing->eraseFromParent();
   }
 
   llvm::LLVMContext &ctx = llvmModule.getContext();
   llvm::Type *f32Ty = llvm::Type::getFloatTy(ctx);
+  llvm::Type *i64Ty = llvm::Type::getInt64Ty(ctx);
   llvm::Type *ptrTy = llvm::PointerType::get(ctx, 0);
-  auto *wrapperTy = llvm::FunctionType::get(
-      llvm::Type::getVoidTy(ctx), {ptrTy, f32Ty}, false);
+  llvm::Type *voidTy = llvm::Type::getVoidTy(ctx);
 
-  llvm::Function *wrapper = llvm::Function::Create(
-      wrapperTy, llvm::GlobalValue::ExternalLinkage, "softmax_kernel", llvmModule);
-  wrapper->setCallingConv(llvm::CallingConv::PTX_Kernel);
+  // After memref lowering, softmax_norm has the signature:
+  //   void(ptr, ptr, i64, i64, i64,   -- input memref  (alloc, align, offset, size, stride)
+  //        ptr, ptr, i64, i64, i64,   -- output memref
+  //        f32)                        -- sum scalar
+  // The kernel wrapper takes flat pointers + length + sum, and constructs
+  // the memref descriptor args for the call.
+  //
+  // For the scalar (float->float) signature from the old example, we fall
+  // back to the simpler wrapper.
+  unsigned numArgs = softmaxFn->arg_size();
 
-  auto argIt = wrapper->arg_begin();
-  llvm::Argument *outPtr = &*argIt++;
-  outPtr->setName("out");
-  llvm::Argument *sum = &*argIt;
-  sum->setName("sum");
+  if (numArgs == 1 && softmaxFn->getReturnType()->isFloatTy() &&
+      softmaxFn->getArg(0)->getType()->isFloatTy()) {
+    // Legacy scalar path: float(float) -> kernel(float* out, float sum)
+    auto *wrapperTy = llvm::FunctionType::get(voidTy, {ptrTy, f32Ty}, false);
+    llvm::Function *wrapper = llvm::Function::Create(
+        wrapperTy, llvm::GlobalValue::ExternalLinkage, "softmax_kernel", llvmModule);
+    wrapper->setCallingConv(llvm::CallingConv::PTX_Kernel);
 
-  llvm::IRBuilder<> builder(llvm::BasicBlock::Create(ctx, "entry", wrapper));
-  llvm::Value *value = builder.CreateCall(softmaxFn, {sum});
-  builder.CreateStore(value, outPtr);
-  builder.CreateRetVoid();
+    auto argIt = wrapper->arg_begin();
+    llvm::Argument *outPtr = &*argIt++;
+    outPtr->setName("out");
+    llvm::Argument *sum = &*argIt;
+    sum->setName("sum");
 
-  llvm::NamedMDNode *annotations = llvmModule.getOrInsertNamedMetadata("nvvm.annotations");
-  llvm::Metadata *mdValues[] = {
-      llvm::ValueAsMetadata::get(wrapper),
-      llvm::MDString::get(ctx, "kernel"),
-      llvm::ConstantAsMetadata::get(llvm::ConstantInt::get(
-          llvm::Type::getInt32Ty(ctx), 1)),
-  };
-  annotations->addOperand(llvm::MDNode::get(ctx, mdValues));
+    llvm::IRBuilder<> builder(llvm::BasicBlock::Create(ctx, "entry", wrapper));
+    llvm::Value *value = builder.CreateCall(softmaxFn, {sum});
+    builder.CreateStore(value, outPtr);
+    builder.CreateRetVoid();
 
-  return mlir::success();
+    llvm::NamedMDNode *annotations =
+        llvmModule.getOrInsertNamedMetadata("nvvm.annotations");
+    llvm::Metadata *mdValues[] = {
+        llvm::ValueAsMetadata::get(wrapper),
+        llvm::MDString::get(ctx, "kernel"),
+        llvm::ConstantAsMetadata::get(
+            llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx), 1)),
+    };
+    annotations->addOperand(llvm::MDNode::get(ctx, mdValues));
+    return mlir::success();
+  }
+
+  if (numArgs == 11 && softmaxFn->getReturnType()->isVoidTy()) {
+    // Memref path: void(ptr,ptr,i64,i64,i64, ptr,ptr,i64,i64,i64, f32)
+    // Kernel signature: void(ptr input, ptr output, i64 n, f32 sum)
+    auto *wrapperTy =
+        llvm::FunctionType::get(voidTy, {ptrTy, ptrTy, i64Ty, f32Ty}, false);
+    llvm::Function *wrapper = llvm::Function::Create(
+        wrapperTy, llvm::GlobalValue::ExternalLinkage, "softmax_kernel",
+        llvmModule);
+    wrapper->setCallingConv(llvm::CallingConv::PTX_Kernel);
+
+    auto argIt = wrapper->arg_begin();
+    llvm::Argument *inputPtr = &*argIt++;
+    inputPtr->setName("input");
+    llvm::Argument *outputPtr = &*argIt++;
+    outputPtr->setName("output");
+    llvm::Argument *n = &*argIt++;
+    n->setName("n");
+    llvm::Argument *sum = &*argIt;
+    sum->setName("sum");
+
+    llvm::IRBuilder<> builder(llvm::BasicBlock::Create(ctx, "entry", wrapper));
+
+    // Build memref descriptor args for input: (alloc, align, offset=0, size=n, stride=1)
+    llvm::Value *zero64 = llvm::ConstantInt::get(i64Ty, 0);
+    llvm::Value *one64 = llvm::ConstantInt::get(i64Ty, 1);
+
+    // Call softmax_norm with expanded memref descriptors + sum
+    llvm::SmallVector<llvm::Value *, 11> callArgs = {
+        inputPtr,  inputPtr,  zero64, n, one64,   // input memref
+        outputPtr, outputPtr, zero64, n, one64,    // output memref
+        sum,                                        // scalar sum
+    };
+    builder.CreateCall(softmaxFn, callArgs);
+    builder.CreateRetVoid();
+
+    llvm::NamedMDNode *annotations =
+        llvmModule.getOrInsertNamedMetadata("nvvm.annotations");
+    llvm::Metadata *mdValues[] = {
+        llvm::ValueAsMetadata::get(wrapper),
+        llvm::MDString::get(ctx, "kernel"),
+        llvm::ConstantAsMetadata::get(
+            llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx), 1)),
+    };
+    annotations->addOperand(llvm::MDNode::get(ctx, mdValues));
+    return mlir::success();
+  }
+
+  log << "Unsupported signature for 'softmax_norm': expected float(float) "
+         "or void(memref<*xf32>, memref<*xf32>, f32). Got " << numArgs
+      << " args.\n";
+  return mlir::failure();
 }
 
 static mlir::LogicalResult writeLlvmIrFile(mlir::ModuleOp module,

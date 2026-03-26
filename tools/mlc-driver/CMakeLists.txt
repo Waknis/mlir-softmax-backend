@@ -16,6 +16,7 @@ target_link_libraries(mlc-driver
     MLIRArithmeticToLLVM
     MLIRControlFlowToLLVM
     MLIRFuncToLLVM
+    MLIRMemRefToLLVM
     MLIRReconcileUnrealizedCasts
     MLIRSCFToControlFlow
     MLIRTargetLLVMIRExport

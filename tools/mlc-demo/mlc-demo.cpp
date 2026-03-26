@@ -8,6 +8,7 @@
 #endif
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/DialectRegistry.h"
 #include "mlir/IR/MLIRContext.h"
@@ -18,7 +19,9 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include <cmath>
+#include <cstdint>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -44,10 +47,9 @@ llvm::cl::opt<bool> kVerify(
 llvm::cl::opt<std::string> kLlc(
     "llc", llvm::cl::desc("Optional llc path override"), llvm::cl::init(""));
 
-float referenceSoftmaxValue(float sum) {
-  constexpr float kRows = 1024.0f;
-  return kRows * (1.0f / sum);
-}
+llvm::cl::opt<std::int64_t> kN(
+    "n", llvm::cl::desc("Number of elements for memref-based kernel"),
+    llvm::cl::init(1024));
 
 }  // namespace
 
@@ -66,7 +68,8 @@ int main(int argc, char **argv) {
 
   mlir::DialectRegistry registry;
   registry.insert<mlir::arith::ArithmeticDialect, mlir::func::FuncDialect,
-                  mlir::LLVM::LLVMDialect, mlir::scf::SCFDialect>();
+                  mlir::memref::MemRefDialect, mlir::LLVM::LLVMDialect,
+                  mlir::scf::SCFDialect>();
   mlir::registerAllToLLVMIRTranslations(registry);
   mlir::MLIRContext context(registry);
 
@@ -106,21 +109,47 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  float gpuOutput = 0.0f;
-  if (!runtime.launchSoftmaxKernel(kSum, gpuOutput, error)) {
-    llvm::errs() << "Kernel launch failed: " << error << "\n";
-    return 1;
-  }
+  // Use memref-based kernel: fill input with 1.0, normalize by sum.
+  const std::int64_t n = kN;
+  std::vector<float> inputHost(static_cast<std::size_t>(n), 1.0f);
+  std::vector<float> outputHost(static_cast<std::size_t>(n), 0.0f);
 
-  float ref = referenceSoftmaxValue(kSum);
-  float absErr = std::fabs(gpuOutput - ref);
+  if (!runtime.launchSoftmaxMemrefKernel(inputHost.data(), outputHost.data(),
+                                         n, kSum, error)) {
+    // Fall back to legacy scalar kernel if memref kernel not found.
+    float gpuOutput = 0.0f;
+    if (!runtime.launchSoftmaxKernel(kSum, gpuOutput, error)) {
+      llvm::errs() << "Kernel launch failed: " << error << "\n";
+      return 1;
+    }
 
-  llvm::outs() << "sum=" << kSum << " gpu=" << gpuOutput << " ref=" << ref
-               << " abs_err=" << absErr << "\n";
+    float ref = static_cast<float>(n) * (1.0f / kSum);
+    float absErr = std::fabs(gpuOutput - ref);
+    llvm::outs() << "sum=" << kSum << " gpu=" << gpuOutput << " ref=" << ref
+                 << " abs_err=" << absErr << "\n";
 
-  if (kVerify && absErr > 1e-3f) {
-    llvm::errs() << "Verification failed: abs_err=" << absErr << "\n";
-    return 1;
+    if (kVerify && absErr > 1e-3f) {
+      llvm::errs() << "Verification failed: abs_err=" << absErr << "\n";
+      return 1;
+    }
+  } else {
+    // Memref kernel succeeded. Each output[i] should be input[i] / sum = 1.0 / sum.
+    float expectedVal = 1.0f / kSum;
+    float maxErr = 0.0f;
+    for (std::int64_t i = 0; i < n; ++i) {
+      float err = std::fabs(outputHost[static_cast<std::size_t>(i)] - expectedVal);
+      if (err > maxErr) {
+        maxErr = err;
+      }
+    }
+
+    llvm::outs() << "n=" << n << " sum=" << kSum << " expected_each="
+                 << expectedVal << " max_abs_err=" << maxErr << "\n";
+
+    if (kVerify && maxErr > 1e-3f) {
+      llvm::errs() << "Verification failed: max_abs_err=" << maxErr << "\n";
+      return 1;
+    }
   }
 
   llvm::outs() << "Demo completed. PTX: " << artifacts.stage4Ptx << "\n";

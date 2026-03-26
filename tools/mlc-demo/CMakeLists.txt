@@ -17,6 +17,7 @@ target_link_libraries(mlc-demo
     MLIRArithmeticToLLVM
     MLIRControlFlowToLLVM
     MLIRFuncToLLVM
+    MLIRMemRefToLLVM
     MLIRReconcileUnrealizedCasts
     MLIRSCFToControlFlow
     MLIRTargetLLVMIRExport

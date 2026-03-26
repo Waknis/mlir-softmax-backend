@@ -7,6 +7,7 @@
 #endif
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/DialectRegistry.h"
@@ -50,7 +51,8 @@ int main(int argc, char **argv) {
 
   mlir::DialectRegistry registry;
   registry.insert<mlir::arith::ArithmeticDialect, mlir::func::FuncDialect,
-                  mlir::LLVM::LLVMDialect, mlir::scf::SCFDialect>();
+                  mlir::memref::MemRefDialect, mlir::LLVM::LLVMDialect,
+                  mlir::scf::SCFDialect>();
   mlir::registerAllToLLVMIRTranslations(registry);
 
   mlir::MLIRContext context(registry);

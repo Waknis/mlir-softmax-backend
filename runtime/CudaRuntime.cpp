@@ -346,6 +346,88 @@ bool CudaRuntime::launchSoftmaxKernel(float sum,
   return true;
 }
 
+bool CudaRuntime::launchSoftmaxMemrefKernel(const float *inputHost,
+                                            float *outputHost,
+                                            std::int64_t n, float sum,
+                                            std::string &error) {
+  if (!impl_->module) {
+    error = "No CUDA module loaded.";
+    return false;
+  }
+
+  CUfunction kernel = nullptr;
+  CUresult rc =
+      impl_->cuModuleGetFunction(&kernel, impl_->module, "softmax_kernel");
+  if (rc != kCudaSuccess || !kernel) {
+    error = "cuModuleGetFunction(softmax_kernel) failed: " +
+            impl_->lastError(rc);
+    return false;
+  }
+
+  const std::size_t bytes = static_cast<std::size_t>(n) * sizeof(float);
+
+  CUdeviceptr dInput = 0;
+  rc = impl_->cuMemAlloc(&dInput, bytes);
+  if (rc != kCudaSuccess) {
+    error = "cuMemAlloc(input) failed: " + impl_->lastError(rc);
+    return false;
+  }
+
+  CUdeviceptr dOutput = 0;
+  rc = impl_->cuMemAlloc(&dOutput, bytes);
+  if (rc != kCudaSuccess) {
+    impl_->cuMemFree(dInput);
+    error = "cuMemAlloc(output) failed: " + impl_->lastError(rc);
+    return false;
+  }
+
+  rc = impl_->cuMemcpyHtoD(dInput, inputHost, bytes);
+  if (rc != kCudaSuccess) {
+    impl_->cuMemFree(dInput);
+    impl_->cuMemFree(dOutput);
+    error = "cuMemcpyHtoD(input) failed: " + impl_->lastError(rc);
+    return false;
+  }
+
+  // Zero output buffer.
+  std::vector<float> zeros(static_cast<std::size_t>(n), 0.0f);
+  rc = impl_->cuMemcpyHtoD(dOutput, zeros.data(), bytes);
+  if (rc != kCudaSuccess) {
+    impl_->cuMemFree(dInput);
+    impl_->cuMemFree(dOutput);
+    error = "cuMemcpyHtoD(output) failed: " + impl_->lastError(rc);
+    return false;
+  }
+
+  // Kernel args: (ptr input, ptr output, i64 n, f32 sum)
+  std::int64_t nArg = n;
+  void *args[] = {&dInput, &dOutput, &nArg, &sum};
+
+  // Launch with enough threads to cover n elements.
+  // The kernel itself is a sequential loop, so grid=1, block=1 is correct
+  // for the current scf.for-based IR (no GPU parallelism yet).
+  rc = impl_->cuLaunchKernel(kernel,
+                             1, 1, 1,   // grid
+                             1, 1, 1,   // block
+                             0, nullptr, args, nullptr);
+  if (rc != kCudaSuccess) {
+    impl_->cuMemFree(dInput);
+    impl_->cuMemFree(dOutput);
+    error = "cuLaunchKernel failed: " + impl_->lastError(rc);
+    return false;
+  }
+
+  rc = impl_->cuMemcpyDtoH(outputHost, dOutput, bytes);
+  impl_->cuMemFree(dInput);
+  impl_->cuMemFree(dOutput);
+  if (rc != kCudaSuccess) {
+    error = "cuMemcpyDtoH(output) failed: " + impl_->lastError(rc);
+    return false;
+  }
+
+  return true;
+}
+
 bool CudaRuntime::isCudaAvailable(std::string &reason) {
   CudaRuntime runtime;
   return runtime.initialize(reason);
