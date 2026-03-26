@@ -1,76 +1,31 @@
-# Architecture (MVP)
+# Architecture
 
-## Goals
-- Fuse consecutive elementwise ops from a PyTorch FX graph.
-- Generate a specialized CUDA kernel for concrete shapes.
-- Compile at runtime with NVRTC and cache by graph+shape+dtype+device.
-- Keep a safe eager fallback for unsupported graphs or runtime failures.
+> **Note:** This document previously described a PyTorch FX graph fusion pipeline
+> with NVRTC compilation — a separate prototype that predates the current project.
+> That design is no longer relevant to this codebase.
 
-## High-level split
-- `compiler/`: graph parsing + IR + CUDA code generation.
-- `runtime/`: NVRTC/PTX handling + CUDA driver launch + cache.
+For the current architecture, see [pipeline.md](pipeline.md).
 
-## Compiler pipeline
+## Current Project Overview
 
-### 1) FX parse (`compiler/fx_parser.py`)
-- Uses `torch.fx.symbolic_trace`.
-- Accepts only supported elementwise operations and a single tensor output.
-- Converts graph into expression IR:
-  - `InputExpr(index)`
-  - `ConstExpr(value)`
-  - `UnaryExpr(op, x)`
-  - `BinaryExpr(op, lhs, rhs)`
-- Records input sources:
-  - positional forward args (`placeholder`)
-  - module attrs (`get_attr`, e.g. parameters/buffers)
-- Produces stable `graph_hash` from IR structure + input source order.
+This is a **C++ MLIR compiler backend** with the following components:
 
-### 2) Shape specialization (`compiler/compiler.py`)
-- Runtime call gathers tensor inputs from args/attrs.
-- Computes output broadcast shape from input shapes.
-- Computes per-input broadcast strides aligned to output rank.
-- Builds cache key from `(graph_hash, shapes, dtype, device)`.
+### Compiler (`lib/Passes/`, `compiler/pipeline/`)
+- **Custom MLIR pass** (`mlc-div-to-reciprocal-mul`): LICM + division strength reduction for `scf.for` loops.
+- **Lowering pipeline** (`LoweringPipeline.cpp`): 5-stage pipeline from MLIR input through LLVM dialect, LLVM IR, to NVPTX PTX.
+- Kernel wrapper injection for CUDA kernel launch compatibility.
 
-### 3) CUDA codegen (`compiler/codegen_cuda.py`)
-- Emits one fused kernel per specialized graph/shape set.
-- Kernel characteristics:
-  - grid-stride scalar loop over `numel`,
-  - optional vectorized path:
-    - `float4` for fp32,
-    - `half2` for fp16,
-    - only for non-broadcast aligned contiguous case.
-- Broadcast mode emits `in_offset_i(linear_idx)` helpers that map output index to each input offset using precomputed broadcast-aware strides.
+### Runtime (`runtime/`)
+- **CUDA Driver API wrapper** (`CudaRuntime.cpp`): Dynamic `libcuda.so` loading via `dlopen`/`dlsym`, PTX JIT compilation, device memory management, and kernel launch.
+- Works on native Linux and WSL2 (CUDA driver is forwarded from the Windows host).
 
-## Runtime pipeline
+### Tools (`tools/`)
+- `mlc-opt`: Standalone pass runner for FileCheck testing.
+- `mlc-driver`: End-to-end pipeline driver (MLIR -> PTX).
+- `mlc-demo`: GPU demo with numerical verification.
+- `mlc-bench`: Pass microbenchmark (measures pass execution time and division counts).
 
-### 1) Compile (`runtime/nvrtc_driver.py`)
-- Loads NVRTC and CUDA Driver APIs via `ctypes`.
-- Compiles generated CUDA source to PTX with:
-  - `--gpu-architecture=compute_XY` from active torch device capability,
-  - fast-math options for MVP throughput.
-
-### 2) Cache (`runtime/cache.py`)
-- Memory cache + disk cache (`~/.cache/mini_ml_compiler/<key>.ptx`).
-- If key hit: skip NVRTC compile and load cached PTX.
-
-### 3) Launch (`runtime/launcher.py`)
-- Ensures CUDA context is available (compatible with torch CUDA runtime context).
-- Loads module/function from PTX via CUDA Driver API.
-- Launches on torch current stream with kernel args:
-  - input pointers,
-  - output pointer,
-  - `numel`.
-
-## Correctness and fallback strategy
-- If parsing fails, unsupported graph detected, dtype/device unsupported, or launch fails:
-  - compilation path disables itself,
-  - execution falls back to eager module forward.
-- CUDA tests compare fused output with eager output for:
-  - random no-broadcast shapes,
-  - broadcast edge cases,
-  - fp32/fp16 tolerances.
-
-## Non-goals in MVP
-- Reduction fusion.
-- Multi-output graphs.
-- Autograd integration for backward graph fusion.
+### Testing (`test/`, `tests/`)
+- FileCheck unit tests for pass correctness.
+- Shell-based end-to-end and benchmark contract tests.
+- GPU correctness test harness.
