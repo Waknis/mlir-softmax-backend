@@ -1,21 +1,45 @@
 # MLIR Softmax Backend (C++ / MLIR / LLVM / PTX / CUDA Driver)
 
-This project takes a Softmax-style MLIR program and runs a full backend pipeline:
+A complete end-to-end compiler backend that takes MLIR input through a full pipeline:
 
-`MLIR input -> custom MLIR optimization -> LLVM dialect -> LLVM IR -> PTX -> CUDA Driver launch`
+`MLIR input -> custom optimization pass -> LLVM dialect -> LLVM IR -> PTX -> CUDA Driver kernel launch`
 
-## What this project includes:
-- Built with production-relevant compiler tooling: **MLIR**, **LLVM**, **CMake**, **C++17**.
-- Includes a custom optimization pass with correctness tests (**FileCheck + CTest**).
-- Demonstrates compiler + runtime integration: IR transformation, codegen, PTX emission, module loading, kernel launch.
-- Includes reproducible benchmarking and numerical verification workflows.
+## What this project demonstrates
 
-## Technical Scope:
-- MLIR pass development (`OperationPass`, IR rewrite, loop-invariance handling).
-- Lowering pipeline construction across dialect boundaries.
-- LLVM IR export and NVPTX emission (`llc`, `nvptx64-nvidia-cuda`).
-- CUDA Driver API integration (dynamic loading, module load, kernel launch, device memory ops).
-- Build/test automation with CMake + CTest + shell-based integration tests.
+- **Full compiler pipeline**: MLIR parse, optimization, multi-dialect lowering, LLVM IR export, NVPTX codegen, and GPU kernel execution — all in C++17.
+- **Custom MLIR pass**: Loop-invariant code motion (LICM) for floating-point division, replacing in-loop `arith.divf` with a hoisted reciprocal and `arith.mulf`. This is a standard strength reduction optimization.
+- **CUDA Driver API integration**: Dynamic loading of libcuda.so, PTX JIT compilation, device memory management, and kernel launch — works on native Linux and WSL2.
+- **Testing infrastructure**: FileCheck unit tests, end-to-end pipeline tests, GPU correctness verification, and benchmarking with CTest.
+
+## Custom Optimization Pass
+
+**Pass:** `mlc-div-to-reciprocal-mul`
+
+Standard LICM + division strength reduction:
+- Detects loop-invariant denominators in `scf.for` loops.
+- Hoists `1.0 / denom` (reciprocal) outside the loop.
+- Replaces in-loop `arith.divf %x, %denom` with `arith.mulf %x, %recip`.
+
+### Before (baseline)
+```mlir
+scf.for %i = %c0 to %c1024 step %c1 {
+  %x = memref.load %input[%i] : memref<1024xf32>
+  %y = arith.divf %x, %sum : f32
+  memref.store %y, %output[%i] : memref<1024xf32>
+}
+```
+
+### After (optimized)
+```mlir
+%recip = arith.divf %one, %sum : f32
+scf.for %i = %c0 to %c1024 step %c1 {
+  %x = memref.load %input[%i] : memref<1024xf32>
+  %y = arith.mulf %x, %recip : f32
+  memref.store %y, %output[%i] : memref<1024xf32>
+}
+```
+
+For a loop of N iterations, this reduces N divisions to 1 division + N multiplications.
 
 ## Project Pipeline
 ```mermaid
@@ -28,42 +52,16 @@ flowchart LR
   F --> G["Reference Check"]
 ```
 
-## Custom Optimization Pass
-**Pass:** `mlc-div-to-reciprocal-mul`
-
-What it does:
-- Detects loop-invariant denominator values inside `scf.for`.
-- Hoists reciprocal computation out of loop body.
-- Rewrites in-loop `arith.divf` into `arith.mulf`.
-
-### Before (baseline)
-```mlir
-%inner = scf.for %i = %c0 to %cN step %c1 iter_args(%acc = %row_acc) -> (f32) {
-  %d = arith.divf %one, %sum : f32
-  %next = arith.addf %acc, %d : f32
-  scf.yield %next : f32
-}
-```
-
-### After (optimized)
-```mlir
-%recip = arith.divf %one, %sum : f32
-%inner = scf.for %i = %c0 to %cN step %c1 iter_args(%acc = %row_acc) -> (f32) {
-  %d = arith.mulf %one, %recip : f32
-  %next = arith.addf %acc, %d : f32
-  scf.yield %next : f32
-}
-```
-
-## Measurable Impact
-For benchmarked shapes from `64x64` through `2048x1024`:
-- Estimated dynamic division count changes from **`M*N` -> `M`**.
-- This corresponds to approximately **98.4% to 99.9% fewer divisions**, depending on shape.
-
-A benchmark table is produced by `softmax-benchmark` for at least 10 shapes.
-
 ## Build
+
 ```bash
+# Linux / WSL2 with LLVM 15
+cmake -S . -B build -G Ninja \
+  -DLLVM_DIR=/usr/lib/llvm-15/lib/cmake/llvm \
+  -DMLIR_DIR=/usr/lib/llvm-15/lib/cmake/mlir
+cmake --build build -j
+
+# macOS with Homebrew LLVM
 cmake -S . -B build -G Ninja \
   -DLLVM_DIR=/opt/homebrew/opt/llvm/lib/cmake/llvm \
   -DMLIR_DIR=/opt/homebrew/opt/llvm/lib/cmake/mlir
@@ -76,10 +74,10 @@ ctest --test-dir build --output-on-failure
 ```
 
 Includes:
-- FileCheck validation for custom pass behavior.
-- End-to-end pipeline test (baseline vs optimized).
-- GPU correctness harness (`mlc-demo` invocation).
-- Benchmark-shape contract test (>=10 rows).
+- FileCheck validation for the custom pass.
+- End-to-end pipeline test (baseline vs optimized artifact generation).
+- GPU correctness harness (`mlc-demo` with `--verify`).
+- Benchmark shape contract test.
 
 ## End-to-End Driver
 ```bash
@@ -96,28 +94,20 @@ Includes:
   --verify
 ```
 
-Note:
-- On systems without an NVIDIA CUDA driver, demo exits with a clear `SKIP` message.
+On systems without an NVIDIA GPU or CUDA driver, the demo exits with a `SKIP` message.
 
-## Benchmark (10 Shapes)
+## Benchmark
 ```bash
 ./build/bin/softmax-benchmark \
   --shapes=64x64,64x128,128x128,128x256,256x256,256x512,512x512,512x1024,1024x1024,2048x1024
 ```
 
-Output columns:
-- `shape`
-- `baseline_ms`
-- `optimized_ms`
-- `speedup`
-- `baseline_est_divs`
-- `optimized_est_divs`
-- `div_reduction_%`
+The benchmark counts actual `arith.divf` operations in the IR before and after the optimization pass, and measures pass execution time.
 
 ## Repository Map
 - `lib/Passes/`: custom MLIR optimization pass.
 - `compiler/pipeline/`: staged lowering and PTX emission pipeline.
-- `runtime/`: CUDA Driver runtime wrapper.
+- `runtime/`: CUDA Driver runtime wrapper (dynamic libcuda.so loading).
 - `tools/mlc-opt`: pass runner.
 - `tools/mlc-driver`: end-to-end pipeline driver.
 - `tools/mlc-demo`: GPU demo + numerical verification.
