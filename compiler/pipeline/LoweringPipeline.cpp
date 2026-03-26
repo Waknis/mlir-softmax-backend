@@ -270,9 +270,19 @@ static std::string resolveLlcPath(llvm::StringRef explicitPath) {
     return std::string(homebrewLLC);
   }
 
-  const char *llvm15Llc = "/usr/lib/llvm-15/bin/llc";
-  if (llvm::sys::fs::exists(llvm15Llc)) {
-    return std::string(llvm15Llc);
+  // WSL2 / Linux: check common LLVM versioned paths.
+  const char *wslLlcCandidates[] = {
+      "/usr/lib/llvm-15/bin/llc",
+      "/usr/lib/llvm-14/bin/llc",
+      "/usr/lib/llvm-16/bin/llc",
+      "/usr/lib/llvm-17/bin/llc",
+      "/usr/lib/llvm-18/bin/llc",
+      "/usr/bin/llc",
+  };
+  for (const char *candidate : wslLlcCandidates) {
+    if (llvm::sys::fs::exists(candidate)) {
+      return std::string(candidate);
+    }
   }
 
   return std::string();
