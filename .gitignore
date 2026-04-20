@@ -9,4 +9,6 @@ build_*/
 dist/
 *.egg-info/
 .cache/
+.venv/
+.venv*/
 .DS_Store

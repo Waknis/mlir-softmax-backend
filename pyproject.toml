@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mini-ml-compiler"
 version = "0.1.0"
-description = "Mini ML compiler for fused elementwise PyTorch FX graphs using NVRTC"
+description = "MLIR softmax backend with LLVM-to-PTX lowering and CUDA Driver verification"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
@@ -14,6 +14,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "numpy>=1.26",
   "pytest>=7.4",
 ]
 

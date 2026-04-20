@@ -1,41 +1,54 @@
 # MLIR Softmax Pipeline
 
 ## Overview
-This project lowers a Softmax-style MLIR program to PTX through a staged compiler pipeline.
+
+This project lowers a softmax-style MLIR program to PTX through a staged compiler pipeline.
 
 1. Parse input MLIR.
-2. Apply optimization pipeline (`baseline` or `optimized`).
+2. Apply the selected optimization pipeline (`baseline` or `optimized`).
 3. Lower to LLVM dialect.
 4. Export LLVM IR.
-5. Emit PTX with `llc` (`nvptx64-nvidia-cuda`).
-6. Optionally load and execute on NVIDIA GPU via CUDA Driver API.
+5. Emit PTX with `llc` for `nvptx64-nvidia-cuda`.
+6. Optionally load and execute on an NVIDIA GPU through the CUDA Driver API.
 
-## Optimization in This Project
-Custom pass: `mlc-div-to-reciprocal-mul`
+## Optimization
+
+The custom `mlc-div-to-reciprocal-mul` pass:
 
 - Detects loop-invariant floating-point divisors in `scf.for` loops.
-- Hoists reciprocal computation outside loop body.
+- Hoists reciprocal computation outside the loop body.
 - Replaces in-loop `arith.divf` with `arith.mulf`.
+- Leaves loop-variant denominators unchanged.
 
-This reduces dynamic division count from `M*N` to `M` for a two-dimensional softmax-style loop nest.
+For a two-dimensional softmax-style loop nest, this reduces estimated dynamic division count from `M*N` to `M` when the denominator is loop-invariant.
 
 ## Main Commands
-Configure and build:
+
+Configure and build on Linux or WSL2 with LLVM/MLIR 15:
 
 ```bash
 cmake -S . -B build -G Ninja \
-  -DLLVM_DIR=/opt/homebrew/opt/llvm/lib/cmake/llvm \
-  -DMLIR_DIR=/opt/homebrew/opt/llvm/lib/cmake/mlir
+  -DLLVM_DIR=/usr/lib/llvm-15/lib/cmake/llvm \
+  -DMLIR_DIR=/usr/lib/llvm-15/lib/cmake/mlir \
+  -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ```
 
-Run tests:
+Run native tests:
 
 ```bash
 ctest --test-dir build --output-on-failure
 ```
 
-Run end-to-end driver:
+Run the local GPU verification gate:
+
+```bash
+scripts/verify_wsl_gpu.sh
+```
+
+The GPU gate records the GPU, driver, CUDA toolkit, PyTorch CUDA availability, and NVRTC target before running Pytest, CMake, CTest, driver artifact checks, `mlc-demo --verify`, and the benchmark shape smoke test.
+
+Run the end-to-end driver:
 
 ```bash
 ./build/tools/mlc-driver/mlc-driver \
@@ -44,15 +57,16 @@ Run end-to-end driver:
   --mode optimized
 ```
 
-Run demo (GPU verify when CUDA/NVIDIA is available):
+Run the GPU demo:
 
 ```bash
 ./build/tools/mlc-demo/mlc-demo \
   --input examples/softmax.mlir \
+  --mode optimized \
   --verify
 ```
 
-Run benchmark table for 10 shapes:
+Run the benchmark table for 10 shapes:
 
 ```bash
 ./build/bin/softmax-benchmark \

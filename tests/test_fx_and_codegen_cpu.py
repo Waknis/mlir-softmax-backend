@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -54,6 +55,14 @@ def test_broadcast_stride_helper() -> None:
     assert _broadcast_strides((8, 16), (8, 16)) == (16, 1)
     assert _broadcast_strides((16,), (8, 16)) == (0, 1)
     assert _broadcast_strides((1, 16), (8, 16)) == (0, 1)
+
+
+def test_broadcast_stride_helper_rejects_invalid_shapes() -> None:
+    with pytest.raises(ValueError, match="cannot broadcast"):
+        _broadcast_strides((2, 16, 4), (16, 4))
+
+    with pytest.raises(ValueError, match="Cannot broadcast"):
+        _broadcast_strides((3, 16), (8, 16))
 
 
 def test_codegen_emits_broadcast_indexing_when_needed() -> None:

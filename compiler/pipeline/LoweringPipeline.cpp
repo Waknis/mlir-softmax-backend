@@ -100,7 +100,7 @@ static mlir::LogicalResult runLowerToLlvmDialectStage(mlir::MLIRContext &context
   pm.addPass(mlir::createConvertFuncToLLVMPass());
   pm.addPass(mlir::cf::createConvertControlFlowToLLVMPass());
   pm.addPass(mlir::arith::createConvertArithmeticToLLVMPass());
-  pm.addPass(mlir::createFinalizeMemRefToLLVMConversionPass());
+  pm.addPass(mlir::createMemRefToLLVMPass());
   pm.addPass(mlir::createReconcileUnrealizedCastsPass());
 
   if (mlir::failed(pm.run(module))) {

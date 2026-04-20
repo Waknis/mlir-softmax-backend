@@ -5,6 +5,7 @@
 #include <dlfcn.h>
 #include <array>
 #include <string>
+#include <vector>
 
 namespace mlc {
 namespace {
