@@ -1,10 +1,8 @@
 // Row-wise softmax *normalization* step (per-row divide-by-sum).
 //
 // Scope note: this is the DIVIDE stage of softmax (y[i,j] = x[i,j] / sum[i]),
-// not the full algorithm. The max+exp+reduce stages are performed by the
-// hand CUDA and Triton kernels in `kernels/softmax_online.cu` and
-// `benchmarks/triton_softmax.py`. We keep the MLIR example at the divide
-// stage because:
+// not the full algorithm. We keep the MLIR example at the divide stage
+// because:
 //
 //   1. It is what the existing lowering pipeline (arith+func+memref+scf ->
 //      LLVM -> PTX) is dialect-complete for. Adding `math.exp` would

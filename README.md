@@ -2,96 +2,29 @@
 
 [![CI](https://github.com/Waknis/mlir-softmax-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/Waknis/mlir-softmax-backend/actions/workflows/ci.yml)
 
-This repo is centered on a compact C++ MLIR/LLVM backend that lowers a
-softmax-style MLIR program to PTX and executes it through the CUDA Driver
-API. The core compiler path includes a custom optimization pass,
-`mlc-div-to-reciprocal-mul`, plus staged artifacts from input MLIR through
-LLVM IR and NVPTX.
+A compact C++17 MLIR/LLVM backend that lowers a softmax-shaped MLIR program
+to NVPTX PTX and can execute the generated kernel through the CUDA Driver
+API.
 
-Hand-written CUDA and Triton softmax implementations live beside the
-compiler as performance baselines. They are not emitted by the current
-MLIR pipeline; they set the target for future MLIR-generated row-wise
-softmax work and provide measured Nsight / roofline evidence.
-
-An experimental PyTorch FX to NVRTC elementwise compiler is kept under
-`experiments/fx_nvrtc` so it remains usable without becoming the main
-project identity.
+The current pipeline focuses on the divide-and-normalize stage of row-wise
+softmax, which is the stage exercised by the custom optimization pass:
+`mlc-div-to-reciprocal-mul`.
 
 ```text
-core MLIR  -> custom optimization pass -> LLVM dialect -> LLVM IR -> PTX -> CUDA Driver launch
-baselines  -> hand CUDA / Triton       -> measured softmax throughput, Nsight, roofline
-experiment -> PyTorch FX               -> NVRTC PTX -> CUDA Driver launch
+MLIR input -> custom pass -> LLVM dialect -> LLVM IR -> PTX -> CUDA Driver launch
 ```
-
-## Results
-
-Baseline row-wise softmax on an NVIDIA GeForce RTX 5060 Ti (SM 12.0,
-GDDR7, 448 GB/s peak DRAM bandwidth). These numbers come from the hand
-CUDA and Triton baseline kernels, not from MLIR-emitted kernels. Time is
-the median of 200 CUDA-event-timed launches after 50 untimed warmup iters;
-a 64 MB buffer is zeroed between each launch to flush L2 so the bandwidth
-numbers reflect DRAM-cold traffic.
-
-| Shape      | Backend            | ms (med) | GB/s | % peak BW |
-|------------|--------------------|---------:|-----:|----------:|
-| 1024x4096  | `hand_online_f32`  |   0.091  |  371 |     82.7% |
-| 1024x4096  | `hand_naive_f32`   |   0.093  |  360 |     80.3% |
-| 1024x4096  | `hand_online_f16`  |   0.047  |  356 |     79.4% |
-| 1024x4096  | `triton_f32`       |   0.089  |  379 |     84.6% |
-| 4096x4096  | `hand_online_f32`  |   0.353  |  380 |     84.9% |
-| 4096x4096  | `hand_naive_f32`   |   0.359  |  374 |     83.5% |
-| 4096x4096  | `hand_online_f16`  |   0.181  |  371 |     82.9% |
-| 4096x4096  | `triton_f32`       |   0.349  |  385 |     85.9% |
-| 8192x8192  | `hand_online_f32`  |   1.422  |  378 |     84.3% |
-| 8192x8192  | `hand_naive_f32`   |   1.428  |  376 |     83.9% |
-| 8192x8192  | `hand_online_f16`  |   0.709  |  379 |     84.5% |
-| 8192x8192  | `triton_f32`       |   1.391  |  386 |     86.2% |
-
-Full sweep across seven shapes in [`docs/results.md`](docs/results.md);
-machine-readable in [`docs/results.json`](docs/results.json) /
-[`docs/results.csv`](docs/results.csv).
-
-**Read:** every implementation hits 80-86% of peak DRAM bandwidth on
-shapes large enough to exceed the 32 MB L2. Softmax is a bandwidth-bound
-kernel — at this shape, there's ~15 percentage points of headroom to the
-DRAM ceiling and no headroom at all on the compute ceiling (SM throughput
-< 25% in all four cases — see the [roofline](docs/profiling/roofline.md)).
-Differences between backends at large shapes are within ~4 pp of each
-other: the online (fused) kernel wins in theory by making two row
-traversals instead of three, but that advantage is partly eroded by L2
-hits on the second pass (ncu shows a 28% L2 hit rate on `hand_online_f32`
-at 4096x4096). The f16 variant delivers the largest absolute speedup — a
-clean ~2x — by halving the bytes moved while keeping DRAM throughput
-unchanged.
-
-Profiling artifacts:
-- [`docs/profiling/softmax_online_ncu.md`](docs/profiling/softmax_online_ncu.md) —
-  Nsight Compute (speed-of-light, memory workload, stall reasons) for all
-  four backends at 4096x4096.
-- [`docs/profiling/softmax_nsys.md`](docs/profiling/softmax_nsys.md) —
-  Nsight Systems kernel summary across a 50-iter sweep.
-- [`docs/profiling/roofline.md`](docs/profiling/roofline.md) — roofline
-  plot with all four operating points.
 
 ## What This Demonstrates
 
-- MLIR parsing, pass execution, LLVM dialect lowering, LLVM IR export,
-  NVPTX codegen, and CUDA Driver execution in C++17.
+- MLIR parsing, pass execution, LLVM dialect lowering, LLVM IR export, and
+  NVPTX codegen.
 - A custom MLIR pass, `mlc-div-to-reciprocal-mul`, that hoists
   loop-invariant floating-point division into a reciprocal multiply.
-  Exercised on 1-D and nested 2-D loops via FileCheck tests.
-- Runtime loading of `libcuda.so`, PTX JIT module loading, device memory
-  management, kernel launch, and host-side numerical verification.
-- Baseline hand-written CUDA online softmax with warp-shuffle reduction
-  (`__shfl_xor_sync`) and shared-memory inter-warp merge, templated over
-  block sizes (32 / 64 / 128 / 256 / 512) and dispatched per row width.
-- A Triton baseline and a CUDA-events / L2-flush benchmark harness that
-  report median, p95, GB/s, and % of peak DRAM bandwidth.
-- An experimental PyTorch FX to NVRTC elementwise compiler under
-  `experiments/fx_nvrtc`, intentionally outside the core MLIR backend.
-- Nsight Compute / Nsight Systems profiling captures and a roofline plot.
-- FileCheck, CTest, Python unit tests (correctness + numerical stability),
-  CI, and a local GPU verification gate.
+- End-to-end artifact generation through `mlc-driver`.
+- CUDA Driver API loading of generated PTX and numerical verification
+  through `mlc-demo`.
+- FileCheck tests, CTest integration, CI, and a local WSL/NVIDIA GPU
+  verification gate.
 
 ## Optimization Pass
 
@@ -120,21 +53,22 @@ scf.for %i = %c0 to %c1024 step %c1 {
 }
 ```
 
-The pass also handles nested loops (see
-[`examples/softmax_rowwise.mlir`](examples/softmax_rowwise.mlir) and the
-2-D FileCheck test). Loop-variant denominators are intentionally left
-unchanged and covered by FileCheck tests.
+The pass also handles nested loops, as shown in
+[`examples/softmax_rowwise.mlir`](examples/softmax_rowwise.mlir), reducing
+estimated dynamic division count from `M*N` to `M` when the denominator is
+loop-invariant across the inner loop.
 
-### Scope of the MLIR pipeline vs. the baseline kernels
+## Scope
 
-The MLIR pipeline currently lowers the divide-and-normalize step of
-softmax (y[i,j] = x[i,j] / sum[i]) through `arith + func + memref + scf`
-to LLVM and then to PTX. The full softmax algorithm (safe max subtraction,
-fused exp + reduce, online update) is implemented by the baseline kernels
-in [`kernels/softmax_online.cu`](kernels/softmax_online.cu) and
-[`benchmarks/triton_softmax.py`](benchmarks/triton_softmax.py), and those
-are the kernels the runtime benchmark measures. Adding `math.exp` and
-MLIR-emitted warp-shuffle reductions is future work.
+This backend currently lowers softmax normalization:
+
+```text
+y[i, j] = x[i, j] / sum[i]
+```
+
+It does not yet lower full numerically safe softmax with max subtraction,
+`exp`, reduction, and warp-level parallel reductions. Those are future
+compiler/backend extensions.
 
 ## Build
 
@@ -154,7 +88,7 @@ cmake -S . -B build -G Ninja \
 cmake --build build -j
 ```
 
-macOS with Homebrew LLVM (MLIR-only lanes; CUDA lanes require Linux+NVIDIA):
+macOS with Homebrew LLVM can build the MLIR-only lanes:
 
 ```bash
 cmake -S . -B build -G Ninja \
@@ -163,28 +97,9 @@ cmake -S . -B build -G Ninja \
 cmake --build build -j
 ```
 
-The baseline CUDA kernel library (`kernels/libmlc_softmax_kernels.so`)
-builds automatically when `nvcc` is on `PATH`; if not, the kernels/
-subdirectory silently skips and the Python benchmark prints a warning.
-
-Python:
-
-```bash
-python -m pip install -e ".[dev,triton]"
-```
-
-The `triton` extra is optional (Linux + NVIDIA only). Without it, the
-benchmark harness omits the Triton column.
-
 ## Verification
 
-CPU/Python tests:
-
-```bash
-python -m pytest -q
-```
-
-Native MLIR/LLVM/CUDA tests:
+Native MLIR/LLVM tests:
 
 ```bash
 ctest --test-dir build --output-on-failure
@@ -196,24 +111,12 @@ Local GPU verification gate:
 scripts/verify_wsl_gpu.sh
 ```
 
-The GPU gate records the NVIDIA device, driver, CUDA toolkit, PyTorch CUDA
-availability, and NVRTC target. It then runs Python CUDA correctness
-tests, CMake, CTest, explicit driver artifact checks, `mlc-demo --verify`,
+The GPU gate records the NVIDIA device, driver, and CUDA toolkit. It then
+runs CMake, CTest, explicit driver artifact checks, `mlc-demo --verify`,
 and the pass-static-analysis shape smoke test.
 
-Validated local environment:
-
-```text
-WSL2 Ubuntu 24.04
-NVIDIA GeForce RTX 5060 Ti, compute capability 12.0
-NVIDIA driver 595.97
-CUDA toolkit 13.2
-```
-
-CI runs the CPU/Python and native MLIR/LLVM lanes on Ubuntu 24.04.
-CUDA-dependent tests (both the MLIR runtime path and the hand-CUDA
-kernel tests) are skip-capable in CI because GitHub-hosted runners do not
-provide a GPU.
+CI runs the native MLIR/LLVM lane on Ubuntu 24.04. CUDA-dependent checks
+are skip-capable in CI because GitHub-hosted runners do not provide a GPU.
 
 ## End-to-End Driver
 
@@ -245,12 +148,7 @@ On systems without an NVIDIA GPU or CUDA driver, the demo exits with a
 `SKIP` message. The local GPU verification script treats an unexpected
 skip as a failure.
 
-## Benchmarks
-
-There is one compiler-analysis benchmark and one baseline runtime
-benchmark. They measure different things.
-
-### Pass static analysis (compile time)
+## Pass Analysis
 
 ```bash
 ./build/bin/mlc-pass-analysis \
@@ -259,49 +157,17 @@ benchmark. They measure different things.
 
 Reports `arith.divf` counts before and after the optimization pass, an
 estimated dynamic-division reduction, and pipeline wall time. This is
-**compile-time analysis of the pass effect**, not runtime throughput — the
-synthetic MLIR used here is a softmax-*shaped* loop, not the actual
-softmax algorithm.
-
-### Baseline GPU runtime benchmark
-
-```bash
-python -m benchmarks.softmax_gpu_bench \
-  --shapes 1024x4096 4096x4096 8192x8192 \
-  --md docs/results.md
-```
-
-Measures per-launch runtime, achieved DRAM bandwidth, and % of peak across
-four non-MLIR baseline softmax implementations on the same shapes / dtypes:
-
-| Backend            | Description                                                |
-| ------------------ | ---------------------------------------------------------- |
-| `hand_online_f32`  | Hand CUDA, fused online softmax (Milakov & Gimelshein)     |
-| `hand_naive_f32`   | Hand CUDA, classical 3-pass safe softmax                   |
-| `hand_online_f16`  | Hand CUDA, f16 storage / f32 accumulate                    |
-| `triton_f32`       | Tutorial-style per-row Triton kernel                       |
-
-Timing uses CUDA events (one launch per event pair), 50 warmup iters, 200
-timed iters, and flushes a 64 MB buffer to L2 between each launch (so
-measurements reflect DRAM-cold per-launch throughput, not L2 hits on
-small shapes). Pass `--no-flush-l2` to see the warm-cache numbers instead.
+compile-time/static analysis of the pass effect, not runtime throughput.
 
 ## Repository Map
 
 - `lib/Passes/`: custom MLIR optimization pass.
-- `compiler/pipeline/`: staged MLIR-to-PTX lowering pipeline (C++).
-- `runtime/`: C++ CUDA Driver runtime wrapper for MLIR-emitted PTX.
+- `compiler/pipeline/`: staged MLIR-to-PTX lowering pipeline.
+- `runtime/`: C++ CUDA Driver runtime wrapper for generated PTX.
 - `tools/mlc-opt`: pass runner.
 - `tools/mlc-driver`: end-to-end artifact generator.
 - `tools/mlc-demo`: GPU launch and numerical verification.
-- `kernels/`: baseline hand-written online softmax CUDA kernels + ctypes
-  loader.
-- `benchmarks/`: baseline GPU runtime benchmark, Triton baseline,
-  pass-static-analysis tool, and a minimal harness for ncu/nsys.
-- `experiments/fx_nvrtc/`: experimental PyTorch FX -> NVRTC codegen path,
-  separate from the MLIR backend. Import with
-  `from experiments.fx_nvrtc import compile_module`.
-- `docs/`: benchmark results + profiling artifacts (ncu reports, nsys
-  summary, roofline plot).
-- `test/` and `tests/`: FileCheck, CTest, shell, and Python tests.
+- `benchmarks/`: pass-static-analysis tool.
+- `examples/`: MLIR inputs.
+- `test/` and `tests/`: FileCheck, CTest, shell, and C++ tests.
 - `scripts/verify_wsl_gpu.sh`: local GPU-backed verification gate.

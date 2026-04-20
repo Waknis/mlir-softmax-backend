@@ -1,7 +1,6 @@
-# mlc-pass-analysis: measures *compile-time* effect of the div->recip*mul pass
-# (pipeline wall time, static div-op counts) on synthetic softmax-shaped
-# loops. NOT a runtime benchmark -- for runtime throughput on GPU, use
-# `benchmarks/softmax_gpu_bench.py`.
+# mlc-pass-analysis: measures compile-time/static effect of the
+# div->recip*mul pass (pipeline wall time and static div-op counts) on
+# synthetic softmax-shaped loops. This is not a runtime throughput benchmark.
 add_executable(mlc-pass-analysis
   pass_static_analysis.cpp
   ${PROJECT_SOURCE_DIR}/compiler/pipeline/LoweringPipeline.cpp

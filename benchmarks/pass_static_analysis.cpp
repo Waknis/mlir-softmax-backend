@@ -9,9 +9,6 @@
 //      iteration counts. This is a symbolic-execution-style metric: it
 //      answers "how many div ops did LICM + strength reduction remove?",
 //      not "how fast does the kernel run?".
-//
-// For GPU runtime throughput on real softmax kernels, see
-// `benchmarks/softmax_gpu_bench.py`.
 
 #include "compiler/pipeline/LoweringPipeline.h"
 

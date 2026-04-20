@@ -22,7 +22,6 @@ section "Environment"
 need_cmd nvidia-smi
 need_cmd cmake
 need_cmd ninja
-need_cmd python3
 
 nvidia-smi --query-gpu=name,compute_cap,driver_version --format=csv,noheader
 if command -v nvcc >/dev/null 2>&1; then
@@ -30,7 +29,7 @@ if command -v nvcc >/dev/null 2>&1; then
 elif [[ -x /usr/local/cuda/bin/nvcc ]]; then
   /usr/local/cuda/bin/nvcc --version | tail -n 1
 else
-  echo "nvcc not found; continuing because NVRTC validation uses shared libraries."
+  echo "nvcc not found; continuing because this backend uses the CUDA Driver API at runtime."
 fi
 
 if [[ ! -d "${LLVM_DIR}" || ! -d "${MLIR_DIR}" ]]; then
@@ -46,33 +45,6 @@ On Ubuntu 24.04, install:
 EOF
   exit 1
 fi
-
-section "Python CUDA/NVRTC"
-cd "${ROOT_DIR}"
-python3 - <<'PY'
-import torch
-from experiments.fx_nvrtc.nvrtc_driver import is_nvrtc_available
-
-print(f"torch={torch.__version__}")
-print(f"torch_cuda_available={torch.cuda.is_available()}")
-if not torch.cuda.is_available():
-    raise SystemExit("PyTorch CUDA is required for the local GPU verification gate.")
-
-device = torch.cuda.current_device()
-name = torch.cuda.get_device_name(device)
-major, minor = torch.cuda.get_device_capability(device)
-print(f"torch_device={name}")
-print(f"torch_compute_capability={major}.{minor}")
-print(f"nvrtc_target=compute_{major}{minor}")
-
-available = is_nvrtc_available()
-print(f"nvrtc_driver_available={available}")
-if not available:
-    raise SystemExit("NVRTC and CUDA Driver libraries are required for GPU verification.")
-PY
-
-section "Pytest"
-python3 -m pytest -q
 
 section "Configure and build"
 cmake -S "${ROOT_DIR}" -B "${BUILD_DIR}" -G Ninja \
@@ -130,7 +102,7 @@ fi
 printf '%s\n' "${DEMO_OUTPUT}" | grep -q "Demo completed"
 printf '%s\n' "${DEMO_OUTPUT}" | grep -Eq "max_abs_err=|abs_err="
 
-section "Benchmark shape smoke"
+section "Pass-analysis shape smoke"
 BENCH_OUTPUT="$("${BENCH}" --shapes="${SHAPES}")"
 printf '%s\n' "${BENCH_OUTPUT}"
 ROWS="$(printf '%s\n' "${BENCH_OUTPUT}" | grep -E '^[0-9]+x[0-9]+' | wc -l | tr -d ' ')"
