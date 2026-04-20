@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SOFTMAX_BENCH="$1"
+PASS_ANALYSIS="$1"
 SHAPES="64x64,64x128,128x128,128x256,256x256,256x512,512x512,512x1024,1024x1024,2048x1024"
 
-OUTPUT="$("${SOFTMAX_BENCH}" --shapes="${SHAPES}")"
+OUTPUT="$("${PASS_ANALYSIS}" --shapes="${SHAPES}")"
 echo "${OUTPUT}"
 
 ROWS=$(printf '%s\n' "${OUTPUT}" | grep -E '^[0-9]+x[0-9]+' | wc -l | tr -d ' ')

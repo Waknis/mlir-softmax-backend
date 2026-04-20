@@ -1,3 +1,18 @@
+// Static analysis of the div->recip*mul pass effect.
+//
+// This tool does NOT measure runtime. It:
+//   1. Builds a synthetic elementwise-div MLIR module (softmax-*shaped*
+//      loops, not the actual softmax algorithm).
+//   2. Runs the full lowering pipeline and reports compile wall time.
+//   3. Counts the dynamic divisions before vs after the div->recip*mul pass
+//      by walking the hoisted/in-loop divs and multiplying by the static
+//      iteration counts. This is a symbolic-execution-style metric: it
+//      answers "how many div ops did LICM + strength reduction remove?",
+//      not "how fast does the kernel run?".
+//
+// For GPU runtime throughput on real softmax kernels, see
+// `benchmarks/softmax_gpu_bench.py`.
+
 #include "compiler/pipeline/LoweringPipeline.h"
 
 #if __has_include("mlir/Dialect/Arith/IR/Arith.h")

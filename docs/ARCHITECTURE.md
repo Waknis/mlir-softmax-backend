@@ -22,12 +22,27 @@ This repository contains a C++ MLIR compiler backend with the following componen
 - `mlc-opt`: standalone pass runner for FileCheck testing.
 - `mlc-driver`: end-to-end pipeline driver from MLIR to PTX artifacts.
 - `mlc-demo`: GPU demo with numerical verification.
-- `mlc-bench`: pass microbenchmark for execution time and division counts.
+- `mlc-pass-analysis` (in `benchmarks/`): pass microbenchmark for
+  compile-time pipeline wall time and dynamic division counts.
+
+### Hand kernels + Python harness (`kernels/`, `benchmarks/`)
+
+- `kernels/softmax_online.cu`: hand-written online softmax CUDA kernels
+  (online, naive 3-pass, f16) with warp-shuffle reduction and templated
+  block-size dispatch. Built into a `.so` loaded from Python via ctypes.
+- `benchmarks/softmax_gpu_bench.py`: CUDA-event-timed benchmark harness
+  that sweeps shapes / dtypes across the hand kernels, Triton baseline,
+  and (optionally) PyTorch's cuDNN-backed softmax, with an L2 flush
+  between launches to keep bandwidth numbers DRAM-bound.
+- `benchmarks/triton_softmax.py`: tutorial-style per-row Triton kernel.
+- `docs/profiling/`: committed Nsight Compute / Nsight Systems reports
+  and the roofline plot, all regeneratable.
 
 ### Testing (`test/`, `tests/`, `scripts/`)
 
-- FileCheck unit tests for pass correctness.
-- Shell-based end-to-end and benchmark contract tests.
-- CTest coverage for the native pipeline.
-- Pytest coverage for Python helper/runtime components.
+- FileCheck unit tests for pass correctness on 1-D and nested 2-D loops.
+- Shell-based end-to-end and pass-analysis contract tests.
+- CTest coverage for the native pipeline and CUDA correctness test.
+- Pytest coverage for Python helper/runtime components and the
+  hand-kernel correctness + numerical-stability suite.
 - Local GPU verification through `scripts/verify_wsl_gpu.sh`.

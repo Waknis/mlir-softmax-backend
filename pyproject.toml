@@ -17,9 +17,15 @@ dev = [
   "numpy>=1.26",
   "pytest>=7.4",
 ]
+# Optional Triton baseline for the GPU runtime benchmark. Triton 3.x requires
+# a CUDA-capable environment; on CPU-only hosts, install without this extra
+# and `softmax_gpu_bench` will skip the Triton column.
+triton = [
+  "triton>=3.0; platform_system == 'Linux'",
+]
 
 [tool.setuptools]
-packages = ["compiler", "runtime"]
+packages = ["compiler", "runtime", "kernels", "benchmarks"]
 
 [tool.pytest.ini_options]
 addopts = "-ra"

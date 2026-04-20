@@ -29,6 +29,16 @@ add_test(
 )
 
 add_test(
+  NAME mlc-div-to-reciprocal-mul-2d
+  COMMAND ${CMAKE_COMMAND}
+    -DMLC_OPT=$<TARGET_FILE:mlc-opt>
+    -DFILECHECK_EXE=${FILECHECK_EXE}
+    -DINPUT_FILE=${CMAKE_CURRENT_SOURCE_DIR}/FileCheck/div_to_reciprocal_mul_2d.mlir
+    -DTMP_FILE=${CMAKE_CURRENT_BINARY_DIR}/div_to_reciprocal_mul_2d.out.mlir
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/run_filecheck.cmake
+)
+
+add_test(
   NAME mlc-driver-end-to-end
   COMMAND ${BASH_EXE}
     ${PROJECT_SOURCE_DIR}/tests/test_pipeline_end_to_end.sh
@@ -50,8 +60,8 @@ add_test(
 )
 
 add_test(
-  NAME mlc-benchmark-10-shapes
+  NAME mlc-pass-analysis-10-shapes
   COMMAND ${BASH_EXE}
     ${PROJECT_SOURCE_DIR}/tests/test_benchmark_shapes.sh
-    $<TARGET_FILE:softmax-benchmark>
+    $<TARGET_FILE:mlc-pass-analysis>
 )

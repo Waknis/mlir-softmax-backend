@@ -87,7 +87,7 @@ ctest --test-dir "${BUILD_DIR}" --output-on-failure
 section "Driver artifacts"
 DRIVER="${BUILD_DIR}/tools/mlc-driver/mlc-driver"
 DEMO="${BUILD_DIR}/tools/mlc-demo/mlc-demo"
-BENCH="${BUILD_DIR}/bin/softmax-benchmark"
+BENCH="${BUILD_DIR}/bin/mlc-pass-analysis"
 ARTIFACT_DIR="${BUILD_DIR}/manual-artifacts"
 BASELINE_DIR="${ARTIFACT_DIR}/baseline"
 OPT_DIR="${ARTIFACT_DIR}/optimized"

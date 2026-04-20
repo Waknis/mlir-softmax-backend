@@ -293,7 +293,13 @@ static mlir::LogicalResult emitPtxWithLlc(llvm::StringRef llcPath,
                                           llvm::StringRef ptxPath,
                                           llvm::raw_ostream &log) {
   if (llcPath.empty()) {
-    log << "Could not find llc executable.\n";
+    log << "Could not find llc executable. Searched $PATH for 'llc' and "
+        << "'llc-15', plus:\n"
+        << "  /opt/homebrew/opt/llvm/bin/llc\n"
+        << "  /usr/lib/llvm-{14,15,16,17,18}/bin/llc\n"
+        << "  /usr/bin/llc\n"
+        << "Pass --llc=<path> to override (for example, "
+        << "--llc=/usr/lib/llvm-15/bin/llc).\n";
     return mlir::failure();
   }
 

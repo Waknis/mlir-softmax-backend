@@ -66,9 +66,15 @@ Run the GPU demo:
   --verify
 ```
 
-Run the benchmark table for 10 shapes:
+Run the pass static-analysis table for 10 shapes (compile-time, not runtime):
 
 ```bash
-./build/bin/softmax-benchmark \
+./build/bin/mlc-pass-analysis \
   --shapes=64x64,64x128,128x128,128x256,256x256,256x512,512x512,512x1024,1024x1024,2048x1024
+```
+
+Run the GPU runtime benchmark across four backends:
+
+```bash
+python -m benchmarks.softmax_gpu_bench --shapes 1024x4096 4096x4096 8192x8192
 ```

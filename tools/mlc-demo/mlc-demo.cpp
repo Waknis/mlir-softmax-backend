@@ -128,7 +128,7 @@ int main(int argc, char **argv) {
     llvm::outs() << "sum=" << kSum << " gpu=" << gpuOutput << " ref=" << ref
                  << " abs_err=" << absErr << "\n";
 
-    if (kVerify && absErr > 1e-3f) {
+    if (kVerify && absErr > 1e-5f) {
       llvm::errs() << "Verification failed: abs_err=" << absErr << "\n";
       return 1;
     }
@@ -146,7 +146,7 @@ int main(int argc, char **argv) {
     llvm::outs() << "n=" << n << " sum=" << kSum << " expected_each="
                  << expectedVal << " max_abs_err=" << maxErr << "\n";
 
-    if (kVerify && maxErr > 1e-3f) {
+    if (kVerify && maxErr > 1e-5f) {
       llvm::errs() << "Verification failed: max_abs_err=" << maxErr << "\n";
       return 1;
     }
