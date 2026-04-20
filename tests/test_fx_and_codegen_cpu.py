@@ -6,9 +6,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.fx
 
-from compiler.codegen_cuda import generate_cuda_source
-from compiler.compiler import _broadcast_strides
-from compiler.fx_parser import parse_fx_graph
+from experiments.fx_nvrtc.codegen_cuda import generate_cuda_source
+from experiments.fx_nvrtc.compiler import _broadcast_strides
+from experiments.fx_nvrtc.fx_parser import parse_fx_graph
 
 
 class GeluPattern(nn.Module):

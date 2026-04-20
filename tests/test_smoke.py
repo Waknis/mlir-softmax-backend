@@ -4,9 +4,9 @@ import pytest
 import torch
 import torch.nn as nn
 
-from compiler import compile_module
-from runtime.cache import KernelCache
-from runtime.launcher import KernelLauncher, LaunchRequest, LoadedKernel
+from experiments.fx_nvrtc import compile_module
+from experiments.fx_nvrtc.cache import KernelCache
+from experiments.fx_nvrtc.launcher import KernelLauncher, LaunchRequest, LoadedKernel
 
 
 class Identity(nn.Module):
@@ -52,7 +52,7 @@ def test_launcher_rejects_invalid_launch_request(monkeypatch, tmp_path) -> None:
     class FakeDriver:
         pass
 
-    monkeypatch.setattr("runtime.launcher.CUDANVRTCDriver", FakeDriver)
+    monkeypatch.setattr("experiments.fx_nvrtc.launcher.CUDANVRTCDriver", FakeDriver)
     launcher = KernelLauncher(cache=KernelCache(cache_dir=tmp_path))
     request = LaunchRequest(cache_key="k", source="extern C", kernel_name="kernel")
 
@@ -78,7 +78,7 @@ def test_launcher_compiles_loads_and_caches_kernel(monkeypatch, tmp_path) -> Non
             assert kernel_name == "kernel"
             return LoadedKernel(module=None, function=None)
 
-    monkeypatch.setattr("runtime.launcher.CUDANVRTCDriver", FakeDriver)
+    monkeypatch.setattr("experiments.fx_nvrtc.launcher.CUDANVRTCDriver", FakeDriver)
     launcher = KernelLauncher(cache=KernelCache(cache_dir=tmp_path))
     request = LaunchRequest(cache_key="cache-key", source="source", kernel_name="kernel")
 

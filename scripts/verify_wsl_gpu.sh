@@ -51,7 +51,7 @@ section "Python CUDA/NVRTC"
 cd "${ROOT_DIR}"
 python3 - <<'PY'
 import torch
-from runtime.nvrtc_driver import is_nvrtc_available
+from experiments.fx_nvrtc.nvrtc_driver import is_nvrtc_available
 
 print(f"torch={torch.__version__}")
 print(f"torch_cuda_available={torch.cuda.is_available()}")

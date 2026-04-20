@@ -2,28 +2,35 @@
 
 [![CI](https://github.com/Waknis/mlir-softmax-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/Waknis/mlir-softmax-backend/actions/workflows/ci.yml)
 
-Two things live in this repo, deliberately side-by-side:
+This repo is centered on a compact C++ MLIR/LLVM backend that lowers a
+softmax-style MLIR program to PTX and executes it through the CUDA Driver
+API. The core compiler path includes a custom optimization pass,
+`mlc-div-to-reciprocal-mul`, plus staged artifacts from input MLIR through
+LLVM IR and NVPTX.
 
-1. **A compact MLIR/LLVM backend** that lowers a softmax-style MLIR program
-   to PTX and executes it through the CUDA Driver API, with a custom
-   optimization pass (`mlc-div-to-reciprocal-mul`).
-2. **Hand-written online softmax CUDA kernels** plus a Triton baseline and
-   a GPU benchmark harness, so the repo's "performance" framing is backed
-   by measured numbers — Nsight Compute / Nsight Systems captures and a
-   roofline plot included.
+Hand-written CUDA and Triton softmax implementations live beside the
+compiler as performance baselines. They are not emitted by the current
+MLIR pipeline; they set the target for future MLIR-generated row-wise
+softmax work and provide measured Nsight / roofline evidence.
+
+An experimental PyTorch FX to NVRTC elementwise compiler is kept under
+`experiments/fx_nvrtc` so it remains usable without becoming the main
+project identity.
 
 ```text
-MLIR input -> custom optimization pass -> LLVM dialect -> LLVM IR -> PTX -> CUDA Driver launch
-hand CUDA  -> nvcc --use_fast_math     -> .so          -> ctypes -> Python benchmark harness
-Triton     -> triton.jit               -> PTX (JIT)    -> Python benchmark harness
+core MLIR  -> custom optimization pass -> LLVM dialect -> LLVM IR -> PTX -> CUDA Driver launch
+baselines  -> hand CUDA / Triton       -> measured softmax throughput, Nsight, roofline
+experiment -> PyTorch FX               -> NVRTC PTX -> CUDA Driver launch
 ```
 
 ## Results
 
-Row-wise softmax on an NVIDIA GeForce RTX 5060 Ti (SM 12.0, GDDR7, 448 GB/s
-peak DRAM bandwidth). Time is the median of 200 CUDA-event-timed launches
-after 50 untimed warmup iters; a 64 MB buffer is zeroed between each launch
-to flush L2 so the bandwidth numbers reflect DRAM-cold traffic.
+Baseline row-wise softmax on an NVIDIA GeForce RTX 5060 Ti (SM 12.0,
+GDDR7, 448 GB/s peak DRAM bandwidth). These numbers come from the hand
+CUDA and Triton baseline kernels, not from MLIR-emitted kernels. Time is
+the median of 200 CUDA-event-timed launches after 50 untimed warmup iters;
+a 64 MB buffer is zeroed between each launch to flush L2 so the bandwidth
+numbers reflect DRAM-cold traffic.
 
 | Shape      | Backend            | ms (med) | GB/s | % peak BW |
 |------------|--------------------|---------:|-----:|----------:|
@@ -75,11 +82,13 @@ Profiling artifacts:
   Exercised on 1-D and nested 2-D loops via FileCheck tests.
 - Runtime loading of `libcuda.so`, PTX JIT module loading, device memory
   management, kernel launch, and host-side numerical verification.
-- Hand-written CUDA online softmax with warp-shuffle reduction
+- Baseline hand-written CUDA online softmax with warp-shuffle reduction
   (`__shfl_xor_sync`) and shared-memory inter-warp merge, templated over
   block sizes (32 / 64 / 128 / 256 / 512) and dispatched per row width.
-- A Triton reference implementation and a CUDA-events / L2-flush benchmark
-  harness that reports median, p95, GB/s, and % of peak DRAM bandwidth.
+- A Triton baseline and a CUDA-events / L2-flush benchmark harness that
+  report median, p95, GB/s, and % of peak DRAM bandwidth.
+- An experimental PyTorch FX to NVRTC elementwise compiler under
+  `experiments/fx_nvrtc`, intentionally outside the core MLIR backend.
 - Nsight Compute / Nsight Systems profiling captures and a roofline plot.
 - FileCheck, CTest, Python unit tests (correctness + numerical stability),
   CI, and a local GPU verification gate.
@@ -116,17 +125,16 @@ The pass also handles nested loops (see
 2-D FileCheck test). Loop-variant denominators are intentionally left
 unchanged and covered by FileCheck tests.
 
-### Scope of the MLIR pipeline vs. the hand kernels
+### Scope of the MLIR pipeline vs. the baseline kernels
 
 The MLIR pipeline currently lowers the divide-and-normalize step of
 softmax (y[i,j] = x[i,j] / sum[i]) through `arith + func + memref + scf`
 to LLVM and then to PTX. The full softmax algorithm (safe max subtraction,
-fused exp + reduce, online update) is implemented in
-[`kernels/softmax_online.cu`](kernels/softmax_online.cu) and in Triton,
-and those are the kernels the runtime benchmark measures. Adding `math.exp`
-to the MLIR pipeline is future work — the stretch goal is MLIR-emitted
-warp-shuffle reductions, which would make the pipeline perf-competitive
-with the hand kernel.
+fused exp + reduce, online update) is implemented by the baseline kernels
+in [`kernels/softmax_online.cu`](kernels/softmax_online.cu) and
+[`benchmarks/triton_softmax.py`](benchmarks/triton_softmax.py), and those
+are the kernels the runtime benchmark measures. Adding `math.exp` and
+MLIR-emitted warp-shuffle reductions is future work.
 
 ## Build
 
@@ -155,9 +163,9 @@ cmake -S . -B build -G Ninja \
 cmake --build build -j
 ```
 
-The CUDA kernel library (`kernels/libmlc_softmax_kernels.so`) builds
-automatically when `nvcc` is on `PATH`; if not, the kernels/ subdirectory
-silently skips and the Python benchmark prints a warning.
+The baseline CUDA kernel library (`kernels/libmlc_softmax_kernels.so`)
+builds automatically when `nvcc` is on `PATH`; if not, the kernels/
+subdirectory silently skips and the Python benchmark prints a warning.
 
 Python:
 
@@ -239,7 +247,8 @@ skip as a failure.
 
 ## Benchmarks
 
-There are two benchmark harnesses here; they measure different things.
+There is one compiler-analysis benchmark and one baseline runtime
+benchmark. They measure different things.
 
 ### Pass static analysis (compile time)
 
@@ -254,7 +263,7 @@ estimated dynamic-division reduction, and pipeline wall time. This is
 synthetic MLIR used here is a softmax-*shaped* loop, not the actual
 softmax algorithm.
 
-### GPU runtime benchmark
+### Baseline GPU runtime benchmark
 
 ```bash
 python -m benchmarks.softmax_gpu_bench \
@@ -263,7 +272,7 @@ python -m benchmarks.softmax_gpu_bench \
 ```
 
 Measures per-launch runtime, achieved DRAM bandwidth, and % of peak across
-four softmax implementations on the same shapes / dtypes:
+four non-MLIR baseline softmax implementations on the same shapes / dtypes:
 
 | Backend            | Description                                                |
 | ------------------ | ---------------------------------------------------------- |
@@ -281,15 +290,17 @@ small shapes). Pass `--no-flush-l2` to see the warm-cache numbers instead.
 
 - `lib/Passes/`: custom MLIR optimization pass.
 - `compiler/pipeline/`: staged MLIR-to-PTX lowering pipeline (C++).
-- `compiler/*.py`: **experimental** PyTorch FX -> CUDA codegen path,
-  separate from the MLIR pipeline. Used by the Python CUDA tests.
-- `runtime/`: CUDA Driver runtime wrapper.
-- `kernels/`: hand-written online softmax CUDA kernels + ctypes loader.
+- `runtime/`: C++ CUDA Driver runtime wrapper for MLIR-emitted PTX.
 - `tools/mlc-opt`: pass runner.
 - `tools/mlc-driver`: end-to-end artifact generator.
 - `tools/mlc-demo`: GPU launch and numerical verification.
-- `benchmarks/`: GPU runtime benchmark, Triton baseline, pass-static-analysis
-  tool, and a minimal harness for ncu/nsys.
+- `kernels/`: baseline hand-written online softmax CUDA kernels + ctypes
+  loader.
+- `benchmarks/`: baseline GPU runtime benchmark, Triton baseline,
+  pass-static-analysis tool, and a minimal harness for ncu/nsys.
+- `experiments/fx_nvrtc/`: experimental PyTorch FX -> NVRTC codegen path,
+  separate from the MLIR backend. Import with
+  `from experiments.fx_nvrtc import compile_module`.
 - `docs/`: benchmark results + profiling artifacts (ncu reports, nsys
   summary, roofline plot).
 - `test/` and `tests/`: FileCheck, CTest, shell, and Python tests.

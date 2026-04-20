@@ -18,7 +18,7 @@ class KernelCache:
 
     def __init__(self, cache_dir: Optional[Path] = None) -> None:
         self._mem: Dict[str, KernelArtifact] = {}
-        self.cache_dir = cache_dir or Path.home() / ".cache" / "mini_ml_compiler"
+        self.cache_dir = cache_dir or Path.home() / ".cache" / "mlir_softmax_backend" / "fx_nvrtc"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     def get(self, key: str) -> Optional[KernelArtifact]:

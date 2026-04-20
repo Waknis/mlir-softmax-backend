@@ -6,6 +6,10 @@
 
 Row-wise softmax along the inner axis. Time is median over 200 CUDA-event iterations after 50 warmup iters.
 
+These are baseline measurements for the hand CUDA and Triton kernels. They
+are not emitted by the current MLIR pipeline; they are the performance
+target for future MLIR-generated row-wise softmax.
+
 | Shape | Dtype | Backend | ms (med) | ms (p95) | GB/s | % peak |
 |-------|-------|---------|---------:|---------:|-----:|-------:|
 | 256x256 | f32 | `hand_online_f32` | 0.0062 | 0.0068 | 84.7 | 18.9% |

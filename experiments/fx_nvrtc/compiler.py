@@ -13,7 +13,7 @@ import torch.nn as nn
 
 from .codegen_cuda import generate_cuda_source
 from .fx_parser import ParsedGraph, UnsupportedGraphError, parse_fx_graph
-from runtime.launcher import LaunchRequest, get_global_launcher
+from .launcher import LaunchRequest, get_global_launcher
 
 
 def _resolve_attr(root: nn.Module, qualified_name: str) -> Any:

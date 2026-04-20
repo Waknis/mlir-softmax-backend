@@ -5,8 +5,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from compiler import compile_module
-from runtime.nvrtc_driver import is_nvrtc_available
+from experiments.fx_nvrtc import compile_module
+from experiments.fx_nvrtc.nvrtc_driver import is_nvrtc_available
 
 
 class MLPPattern(nn.Module):

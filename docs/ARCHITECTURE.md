@@ -1,48 +1,64 @@
 # Architecture
 
-For the current end-to-end flow, see [pipeline.md](pipeline.md).
+For the current end-to-end compiler flow, see [pipeline.md](pipeline.md).
 
-## Current Project Overview
+## Project Shape
 
-This repository contains a C++ MLIR compiler backend with the following components.
+This repository is organized around one primary path: a C++ MLIR backend
+that lowers a softmax-style MLIR program to PTX and can execute it through
+the CUDA Driver API.
 
-### Compiler (`lib/Passes/`, `compiler/pipeline/`)
+Baseline kernels and Python experiments remain in the repo, but they are
+not part of the core backend:
 
-- Custom MLIR pass (`mlc-div-to-reciprocal-mul`): LICM plus division strength reduction for `scf.for` loops.
-- Lowering pipeline (`LoweringPipeline.cpp`): five-stage pipeline from MLIR input through LLVM dialect and LLVM IR to NVPTX PTX.
-- Kernel wrapper injection for CUDA kernel launch compatibility.
+- **Core backend:** `lib/Passes/`, `compiler/pipeline/`, `runtime/`, and
+  `tools/`.
+- **Performance baselines:** `kernels/`, `benchmarks/softmax_gpu_bench.py`,
+  `benchmarks/triton_softmax.py`, and profiling artifacts under
+  `docs/profiling/`.
+- **Experiments:** `experiments/fx_nvrtc/`, an optional PyTorch FX to NVRTC
+  elementwise compiler.
 
-### Runtime (`runtime/`)
+## Core Backend
 
-- CUDA Driver API wrapper (`CudaRuntime.cpp`): dynamic `libcuda.so` loading through `dlopen`/`dlsym`, PTX JIT module loading, device memory management, and kernel launch.
-- Native Linux and WSL2 support when the NVIDIA driver is available.
+- `lib/Passes/`: custom `mlc-div-to-reciprocal-mul` pass. It hoists
+  loop-invariant floating-point division into one reciprocal outside the
+  loop and replaces in-loop divides with multiplies.
+- `compiler/pipeline/`: staged MLIR-to-PTX lowering. It parses MLIR, applies
+  the selected optimization mode, lowers to LLVM dialect, exports LLVM IR,
+  injects the CUDA kernel wrapper, and emits NVPTX PTX with `llc`.
+- `runtime/`: C++ CUDA Driver API wrapper. It dynamically loads
+  `libcuda.so`, loads generated PTX, manages device buffers, launches the
+  generated kernel, and copies results back for verification.
+- `tools/`: native CLIs. `mlc-opt` runs the pass, `mlc-driver` emits all
+  compiler artifacts, `mlc-demo` launches generated PTX, and
+  `mlc-pass-analysis` reports compile-time pass effects.
 
-### Tools (`tools/`)
+## Baselines
 
-- `mlc-opt`: standalone pass runner for FileCheck testing.
-- `mlc-driver`: end-to-end pipeline driver from MLIR to PTX artifacts.
-- `mlc-demo`: GPU demo with numerical verification.
-- `mlc-pass-analysis` (in `benchmarks/`): pass microbenchmark for
-  compile-time pipeline wall time and dynamic division counts.
+- `kernels/softmax_online.cu`: hand-written CUDA row-wise softmax baselines
+  covering online f32, naive f32, and online f16 implementations.
+- `benchmarks/triton_softmax.py`: Triton row-wise softmax baseline.
+- `benchmarks/softmax_gpu_bench.py`: CUDA-event benchmark harness for the
+  non-MLIR baselines. It reports runtime, bandwidth, and percent of peak
+  DRAM bandwidth.
+- `docs/profiling/`: committed Nsight Compute / Nsight Systems reports and
+  the roofline plot. These artifacts describe the baseline kernels and set
+  a performance target for future MLIR-generated softmax kernels.
 
-### Hand kernels + Python harness (`kernels/`, `benchmarks/`)
+## Experiments
 
-- `kernels/softmax_online.cu`: hand-written online softmax CUDA kernels
-  (online, naive 3-pass, f16) with warp-shuffle reduction and templated
-  block-size dispatch. Built into a `.so` loaded from Python via ctypes.
-- `benchmarks/softmax_gpu_bench.py`: CUDA-event-timed benchmark harness
-  that sweeps shapes / dtypes across the hand kernels, Triton baseline,
-  and (optionally) PyTorch's cuDNN-backed softmax, with an L2 flush
-  between launches to keep bandwidth numbers DRAM-bound.
-- `benchmarks/triton_softmax.py`: tutorial-style per-row Triton kernel.
-- `docs/profiling/`: committed Nsight Compute / Nsight Systems reports
-  and the roofline plot, all regeneratable.
+- `experiments/fx_nvrtc/`: optional PyTorch FX to NVRTC elementwise compiler.
+  Import it with `from experiments.fx_nvrtc import compile_module`.
+- The experiment has its own parser, CUDA source generator, cache, launcher,
+  and NVRTC/CUDA Driver bindings. It is tested, but intentionally separate
+  from the MLIR backend namespace.
 
-### Testing (`test/`, `tests/`, `scripts/`)
+## Testing
 
-- FileCheck unit tests for pass correctness on 1-D and nested 2-D loops.
-- Shell-based end-to-end and pass-analysis contract tests.
-- CTest coverage for the native pipeline and CUDA correctness test.
-- Pytest coverage for Python helper/runtime components and the
-  hand-kernel correctness + numerical-stability suite.
-- Local GPU verification through `scripts/verify_wsl_gpu.sh`.
+- `test/`: FileCheck and CTest coverage for native MLIR behavior.
+- `tests/`: Python tests for the FX/NVRTC experiment, Python helpers, and
+  CUDA softmax baseline correctness.
+- `scripts/verify_wsl_gpu.sh`: local GPU verification gate covering Pytest,
+  CMake, CTest, driver artifacts, `mlc-demo --verify`, and the pass-analysis
+  shape smoke test.

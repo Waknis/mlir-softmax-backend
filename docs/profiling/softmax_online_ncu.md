@@ -5,6 +5,10 @@ Hardware: NVIDIA GeForce RTX 5060 Ti (SM 12.0, GDDR7)
 Tool: `ncu 2026.1.1.0`, sections `SpeedOfLight`, `MemoryWorkloadAnalysis`,
 `LaunchStats`, `Occupancy`, `WarpStateStats`.
 
+This profile is for the hand CUDA / Triton baseline lane, not for an
+MLIR-emitted kernel. It is kept as performance evidence for future MLIR
+softmax work.
+
 Raw report: [`softmax_online_f32_4k.ncu-rep`](softmax_online_f32_4k.ncu-rep)
 
 ## Speed of Light

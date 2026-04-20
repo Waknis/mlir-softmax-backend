@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from runtime.nvrtc_driver import is_nvrtc_available
+from experiments.fx_nvrtc.nvrtc_driver import is_nvrtc_available
 
 
 @pytest.fixture(scope="session")

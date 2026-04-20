@@ -2,7 +2,10 @@
 
 ## Overview
 
-This project lowers a softmax-style MLIR program to PTX through a staged compiler pipeline.
+This project lowers a softmax-style MLIR program to PTX through a staged
+compiler pipeline. This is the core path of the repository; hand CUDA and
+Triton softmax kernels are performance baselines, not outputs of this
+pipeline.
 
 1. Parse input MLIR.
 2. Apply the selected optimization pipeline (`baseline` or `optimized`).
@@ -73,8 +76,16 @@ Run the pass static-analysis table for 10 shapes (compile-time, not runtime):
   --shapes=64x64,64x128,128x128,128x256,256x256,256x512,512x512,512x1024,1024x1024,2048x1024
 ```
 
-Run the GPU runtime benchmark across four backends:
+Run the baseline GPU runtime benchmark across four non-MLIR backends:
 
 ```bash
 python -m benchmarks.softmax_gpu_bench --shapes 1024x4096 4096x4096 8192x8192
 ```
+
+The benchmark results and profiling reports set a performance target for
+future MLIR-generated softmax kernels. The current MLIR pipeline lowers the
+divide-and-normalize softmax stage; full safe softmax with exp/reduce and
+warp-level reductions is future work.
+
+The optional PyTorch FX to NVRTC elementwise compiler lives in
+`experiments/fx_nvrtc/` and is separate from the MLIR backend.

@@ -2,6 +2,9 @@
 
 Traced run: `python -m benchmarks.softmax_gpu_bench --shapes 4096x4096 --iters 50`
 
+This trace covers the non-MLIR baseline softmax kernels. The current MLIR
+pipeline does not emit these kernels yet.
+
 Raw report: [`softmax_sweep_nsys.nsys-rep`](softmax_sweep_nsys.nsys-rep)
 (open in Nsight Systems UI for the full timeline view; regenerate the
 `.sqlite` companion for scripted queries with

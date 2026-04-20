@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from compiler.codegen_cuda import generate_cuda_source
-from compiler.ir import BinaryExpr, InputExpr
+from experiments.fx_nvrtc.codegen_cuda import generate_cuda_source
+from experiments.fx_nvrtc.ir import BinaryExpr, InputExpr
 
 
 def test_codegen_placeholder_contains_kernel() -> None:
