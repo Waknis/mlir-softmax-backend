@@ -1,9 +1,11 @@
 #include "runtime/CudaRuntime.h"
 
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <dlfcn.h>
 #include <array>
+#include <chrono>
 #include <string>
 #include <vector>
 
@@ -16,6 +18,7 @@ using CUcontext = void *;
 using CUmodule = void *;
 using CUfunction = void *;
 using CUstream = void *;
+using CUevent = void *;
 using CUdeviceptr = std::uint64_t;
 
 constexpr CUresult kCudaSuccess = 0;
@@ -46,10 +49,16 @@ struct CudaRuntime::Impl {
   CUresult (*cuDeviceGet)(CUdevice *, int) = nullptr;
   CUresult (*cuCtxCreate)(CUcontext *, unsigned int, CUdevice) = nullptr;
   CUresult (*cuCtxDestroy)(CUcontext) = nullptr;
+  CUresult (*cuCtxSynchronize)() = nullptr;
   CUresult (*cuModuleLoadDataEx)(CUmodule *, const void *, unsigned int, void *,
                                  void *) = nullptr;
   CUresult (*cuModuleUnload)(CUmodule) = nullptr;
   CUresult (*cuModuleGetFunction)(CUfunction *, CUmodule, const char *) = nullptr;
+  CUresult (*cuEventCreate)(CUevent *, unsigned int) = nullptr;
+  CUresult (*cuEventDestroy)(CUevent) = nullptr;
+  CUresult (*cuEventRecord)(CUevent, CUstream) = nullptr;
+  CUresult (*cuEventSynchronize)(CUevent) = nullptr;
+  CUresult (*cuEventElapsedTime)(float *, CUevent, CUevent) = nullptr;
   CUresult (*cuMemAlloc)(CUdeviceptr *, std::size_t) = nullptr;
   CUresult (*cuMemFree)(CUdeviceptr) = nullptr;
   CUresult (*cuMemcpyHtoD)(CUdeviceptr, const void *, std::size_t) = nullptr;
@@ -120,6 +129,27 @@ struct CudaRuntime::Impl {
       cuCtxDestroy =
           reinterpret_cast<CUresult (*)(CUcontext)>(dlsym(library, "cuCtxDestroy"));
     }
+    cuCtxSynchronize =
+        reinterpret_cast<CUresult (*)()>(dlsym(library, "cuCtxSynchronize"));
+
+    cuEventCreate =
+        reinterpret_cast<CUresult (*)(CUevent *, unsigned int)>(
+            dlsym(library, "cuEventCreate"));
+    cuEventDestroy =
+        reinterpret_cast<CUresult (*)(CUevent)>(dlsym(library, "cuEventDestroy_v2"));
+    if (!cuEventDestroy) {
+      cuEventDestroy =
+          reinterpret_cast<CUresult (*)(CUevent)>(dlsym(library, "cuEventDestroy"));
+    }
+    cuEventRecord =
+        reinterpret_cast<CUresult (*)(CUevent, CUstream)>(
+            dlsym(library, "cuEventRecord"));
+    cuEventSynchronize =
+        reinterpret_cast<CUresult (*)(CUevent)>(
+            dlsym(library, "cuEventSynchronize"));
+    cuEventElapsedTime =
+        reinterpret_cast<CUresult (*)(float *, CUevent, CUevent)>(
+            dlsym(library, "cuEventElapsedTime"));
 
     cuMemAlloc = reinterpret_cast<CUresult (*)(CUdeviceptr *, std::size_t)>(
         dlsym(library, "cuMemAlloc_v2"));
@@ -153,7 +183,7 @@ struct CudaRuntime::Impl {
           dlsym(library, "cuMemcpyDtoH"));
     }
 
-    if (!cuCtxCreate || !cuCtxDestroy || !cuMemAlloc || !cuMemFree ||
+    if (!cuCtxCreate || !cuCtxDestroy || !cuCtxSynchronize || !cuMemAlloc || !cuMemFree ||
         !cuMemcpyHtoD || !cuMemcpyDtoH) {
       error = "Missing one or more required CUDA driver symbols for memory/context APIs.";
       return false;
@@ -426,6 +456,207 @@ bool CudaRuntime::launchSoftmaxMemrefKernel(const float *inputHost,
     return false;
   }
 
+  return true;
+}
+
+bool CudaRuntime::benchmarkSoftmaxMemrefKernel(
+    const float *inputHost,
+    float *outputHost,
+    std::int64_t n,
+    float sum,
+    const KernelBenchmarkConfig &config,
+    KernelBenchmarkResult &result,
+    std::string &error) {
+  if (!inputHost || !outputHost) {
+    error = "Host input/output buffers must be non-null.";
+    return false;
+  }
+  if (n <= 0) {
+    error = "Benchmark length must be positive.";
+    return false;
+  }
+  if (config.timedIterations == 0) {
+    error = "Benchmark timedIterations must be greater than zero.";
+    return false;
+  }
+  if (!impl_->module) {
+    error = "No CUDA module loaded.";
+    return false;
+  }
+
+  CUfunction kernel = nullptr;
+  CUresult rc =
+      impl_->cuModuleGetFunction(&kernel, impl_->module, "softmax_kernel");
+  if (rc != kCudaSuccess || !kernel) {
+    error = "cuModuleGetFunction(softmax_kernel) failed: " +
+            impl_->lastError(rc);
+    return false;
+  }
+
+  const std::size_t bytes = static_cast<std::size_t>(n) * sizeof(float);
+  CUdeviceptr dInput = 0;
+  CUdeviceptr dOutput = 0;
+  CUevent startEvent = nullptr;
+  CUevent stopEvent = nullptr;
+
+  auto cleanup = [&]() {
+    if (startEvent && impl_->cuEventDestroy) {
+      impl_->cuEventDestroy(startEvent);
+      startEvent = nullptr;
+    }
+    if (stopEvent && impl_->cuEventDestroy) {
+      impl_->cuEventDestroy(stopEvent);
+      stopEvent = nullptr;
+    }
+    if (dInput) {
+      impl_->cuMemFree(dInput);
+      dInput = 0;
+    }
+    if (dOutput) {
+      impl_->cuMemFree(dOutput);
+      dOutput = 0;
+    }
+  };
+
+  rc = impl_->cuMemAlloc(&dInput, bytes);
+  if (rc != kCudaSuccess) {
+    error = "cuMemAlloc(input) failed: " + impl_->lastError(rc);
+    cleanup();
+    return false;
+  }
+
+  rc = impl_->cuMemAlloc(&dOutput, bytes);
+  if (rc != kCudaSuccess) {
+    error = "cuMemAlloc(output) failed: " + impl_->lastError(rc);
+    cleanup();
+    return false;
+  }
+
+  rc = impl_->cuMemcpyHtoD(dInput, inputHost, bytes);
+  if (rc != kCudaSuccess) {
+    error = "cuMemcpyHtoD(input) failed: " + impl_->lastError(rc);
+    cleanup();
+    return false;
+  }
+
+  bool useEvents = impl_->cuEventCreate && impl_->cuEventDestroy &&
+                   impl_->cuEventRecord && impl_->cuEventSynchronize &&
+                   impl_->cuEventElapsedTime;
+  if (useEvents) {
+    rc = impl_->cuEventCreate(&startEvent, 0);
+    if (rc != kCudaSuccess) {
+      error = "cuEventCreate(start) failed: " + impl_->lastError(rc);
+      cleanup();
+      return false;
+    }
+    rc = impl_->cuEventCreate(&stopEvent, 0);
+    if (rc != kCudaSuccess) {
+      error = "cuEventCreate(stop) failed: " + impl_->lastError(rc);
+      cleanup();
+      return false;
+    }
+  }
+
+  std::int64_t nArg = n;
+  void *args[] = {&dInput, &dOutput, &nArg, &sum};
+
+  for (unsigned iter = 0; iter < config.warmupIterations; ++iter) {
+    rc = impl_->cuLaunchKernel(kernel,
+                               1, 1, 1,
+                               1, 1, 1,
+                               0, nullptr, args, nullptr);
+    if (rc != kCudaSuccess) {
+      error = "cuLaunchKernel warmup failed: " + impl_->lastError(rc);
+      cleanup();
+      return false;
+    }
+  }
+  rc = impl_->cuCtxSynchronize();
+  if (rc != kCudaSuccess) {
+    error = "cuCtxSynchronize after warmup failed: " + impl_->lastError(rc);
+    cleanup();
+    return false;
+  }
+
+  double totalKernelMs = 0.0;
+  for (unsigned iter = 0; iter < config.timedIterations; ++iter) {
+    auto hostStart = std::chrono::high_resolution_clock::now();
+    if (useEvents) {
+      rc = impl_->cuEventRecord(startEvent, nullptr);
+      if (rc != kCudaSuccess) {
+        error = "cuEventRecord(start) failed: " + impl_->lastError(rc);
+        cleanup();
+        return false;
+      }
+    }
+
+    rc = impl_->cuLaunchKernel(kernel,
+                               1, 1, 1,
+                               1, 1, 1,
+                               0, nullptr, args, nullptr);
+    if (rc != kCudaSuccess) {
+      error = "cuLaunchKernel failed: " + impl_->lastError(rc);
+      cleanup();
+      return false;
+    }
+
+    if (useEvents) {
+      rc = impl_->cuEventRecord(stopEvent, nullptr);
+      if (rc != kCudaSuccess) {
+        error = "cuEventRecord(stop) failed: " + impl_->lastError(rc);
+        cleanup();
+        return false;
+      }
+      rc = impl_->cuEventSynchronize(stopEvent);
+      if (rc != kCudaSuccess) {
+        error = "cuEventSynchronize(stop) failed: " + impl_->lastError(rc);
+        cleanup();
+        return false;
+      }
+
+      float kernelMs = 0.0f;
+      rc = impl_->cuEventElapsedTime(&kernelMs, startEvent, stopEvent);
+      if (rc != kCudaSuccess) {
+        error = "cuEventElapsedTime failed: " + impl_->lastError(rc);
+        cleanup();
+        return false;
+      }
+      totalKernelMs += static_cast<double>(kernelMs);
+    } else {
+      rc = impl_->cuCtxSynchronize();
+      if (rc != kCudaSuccess) {
+        error = "cuCtxSynchronize failed: " + impl_->lastError(rc);
+        cleanup();
+        return false;
+      }
+      auto hostEnd = std::chrono::high_resolution_clock::now();
+      totalKernelMs +=
+          std::chrono::duration<double, std::milli>(hostEnd - hostStart).count();
+    }
+  }
+
+  rc = impl_->cuMemcpyDtoH(outputHost, dOutput, bytes);
+  if (rc != kCudaSuccess) {
+    error = "cuMemcpyDtoH(output) failed: " + impl_->lastError(rc);
+    cleanup();
+    return false;
+  }
+
+  cleanup();
+
+  float maxAbsError = 0.0f;
+  for (std::int64_t i = 0; i < n; ++i) {
+    const std::size_t index = static_cast<std::size_t>(i);
+    const float expected = inputHost[index] / sum;
+    const float absErr = std::fabs(outputHost[index] - expected);
+    if (absErr > maxAbsError) {
+      maxAbsError = absErr;
+    }
+  }
+
+  result.avgKernelMs =
+      totalKernelMs / static_cast<double>(config.timedIterations);
+  result.maxAbsError = maxAbsError;
   return true;
 }
 

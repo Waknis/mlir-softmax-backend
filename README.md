@@ -23,6 +23,7 @@ MLIR input -> custom pass -> LLVM dialect -> LLVM IR -> PTX -> CUDA Driver launc
 - End-to-end artifact generation through `mlc-driver`.
 - CUDA Driver API loading of generated PTX and numerical verification
   through `mlc-demo`.
+- A generated-PTX GPU runtime benchmark through `mlc-gpu-bench`.
 - FileCheck tests, CTest integration, CI, and a local WSL/NVIDIA GPU
   verification gate.
 
@@ -148,6 +149,21 @@ On systems without an NVIDIA GPU or CUDA driver, the demo exits with a
 `SKIP` message. The local GPU verification script treats an unexpected
 skip as a failure.
 
+## GPU Runtime Benchmark
+
+```bash
+./build/tools/mlc-gpu-bench/mlc-gpu-bench \
+  --sizes=1024,4096,16384,65536 \
+  --warmup=25 \
+  --iters=100 \
+  --mode=both \
+  --verify
+```
+
+This benchmarks the generated PTX kernel directly on CUDA and reports
+steady-state kernel time, effective bandwidth, numerical error, and
+optimized-vs-baseline speedup. It is a runtime throughput benchmark.
+
 ## Pass Analysis
 
 ```bash
@@ -159,6 +175,21 @@ Reports `arith.divf` counts before and after the optimization pass, an
 estimated dynamic-division reduction, and pipeline wall time. This is
 compile-time/static analysis of the pass effect, not runtime throughput.
 
+## Optional Triton Comparison
+
+The repo does not build Triton into the core C++ toolchain, but it now ships
+an optional Python comparison path for the same normalization kernel shape:
+
+```bash
+python benchmarks/softmax_gpu_bench.py \
+  --mlc-bench ./build/tools/mlc-gpu-bench/mlc-gpu-bench \
+  --sizes=1024,4096,16384,65536
+```
+
+If `torch` and `triton` are installed in your Python environment, the script
+prints `mlc` baseline/optimized rows alongside a Triton row for the same
+vector sizes. `benchmarks/triton_softmax.py` is also runnable on its own.
+
 ## Repository Map
 
 - `lib/Passes/`: custom MLIR optimization pass.
@@ -167,6 +198,7 @@ compile-time/static analysis of the pass effect, not runtime throughput.
 - `tools/mlc-opt`: pass runner.
 - `tools/mlc-driver`: end-to-end artifact generator.
 - `tools/mlc-demo`: GPU launch and numerical verification.
+- `tools/mlc-gpu-bench`: generated-PTX CUDA runtime benchmark.
 - `benchmarks/`: pass-static-analysis tool.
 - `examples/`: MLIR inputs.
 - `test/` and `tests/`: FileCheck, CTest, shell, and C++ tests.

@@ -49,7 +49,8 @@ scripts/verify_wsl_gpu.sh
 
 The GPU gate records the GPU, driver, and CUDA toolkit before running
 CMake, CTest, driver artifact checks, `mlc-demo --verify`, and the
-pass-analysis shape smoke test.
+generated-PTX GPU benchmark smoke test plus the pass-analysis shape smoke
+test.
 
 Run the end-to-end driver:
 
@@ -69,6 +70,20 @@ Run the GPU demo:
   --verify
 ```
 
+Run the generated-PTX CUDA runtime benchmark:
+
+```bash
+./build/tools/mlc-gpu-bench/mlc-gpu-bench \
+  --sizes=1024,4096,16384,65536 \
+  --warmup=25 \
+  --iters=100 \
+  --mode=both \
+  --verify
+```
+
+This benchmark measures repeated kernel launches of the generated PTX and
+reports runtime throughput for baseline vs optimized codegen.
+
 Run the pass static-analysis table for 10 shapes (compile-time, not runtime):
 
 ```bash
@@ -79,3 +94,7 @@ Run the pass static-analysis table for 10 shapes (compile-time, not runtime):
 The current MLIR pipeline lowers the divide-and-normalize softmax stage.
 Full safe softmax with exp/reduce and GPU-parallel row reductions is future
 work.
+
+If you also have `torch` and `triton` available, `benchmarks/softmax_gpu_bench.py`
+can run the generated-PTX benchmark and an optional Triton kernel on the same
+size sweep for side-by-side comparison.

@@ -7,6 +7,16 @@
 
 namespace mlc {
 
+struct KernelBenchmarkConfig {
+  unsigned warmupIterations = 25;
+  unsigned timedIterations = 100;
+};
+
+struct KernelBenchmarkResult {
+  double avgKernelMs = 0.0;
+  float maxAbsError = 0.0f;
+};
+
 class CudaRuntime {
  public:
   CudaRuntime();
@@ -21,6 +31,11 @@ class CudaRuntime {
   bool launchSoftmaxMemrefKernel(const float *inputHost, float *outputHost,
                                  std::int64_t n, float sum,
                                  std::string &error);
+  bool benchmarkSoftmaxMemrefKernel(const float *inputHost, float *outputHost,
+                                    std::int64_t n, float sum,
+                                    const KernelBenchmarkConfig &config,
+                                    KernelBenchmarkResult &result,
+                                    std::string &error);
 
   static bool isCudaAvailable(std::string &reason);
 

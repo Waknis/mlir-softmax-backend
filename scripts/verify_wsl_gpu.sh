@@ -60,6 +60,7 @@ section "Driver artifacts"
 DRIVER="${BUILD_DIR}/tools/mlc-driver/mlc-driver"
 DEMO="${BUILD_DIR}/tools/mlc-demo/mlc-demo"
 BENCH="${BUILD_DIR}/bin/mlc-pass-analysis"
+GPU_BENCH="${BUILD_DIR}/tools/mlc-gpu-bench/mlc-gpu-bench"
 ARTIFACT_DIR="${BUILD_DIR}/manual-artifacts"
 BASELINE_DIR="${ARTIFACT_DIR}/baseline"
 OPT_DIR="${ARTIFACT_DIR}/optimized"
@@ -101,6 +102,20 @@ if printf '%s\n' "${DEMO_OUTPUT}" | grep -q '^SKIP:'; then
 fi
 printf '%s\n' "${DEMO_OUTPUT}" | grep -q "Demo completed"
 printf '%s\n' "${DEMO_OUTPUT}" | grep -Eq "max_abs_err=|abs_err="
+
+section "GPU runtime benchmark smoke"
+GPU_BENCH_OUTPUT="$("${GPU_BENCH}" --sizes=1024 --warmup=5 --iters=25 --output-root "${BUILD_DIR}/manual-gpu-bench" --verify)"
+printf '%s\n' "${GPU_BENCH_OUTPUT}"
+if printf '%s\n' "${GPU_BENCH_OUTPUT}" | grep -q '^SKIP:'; then
+  echo "GPU runtime benchmark skipped unexpectedly." >&2
+  exit 1
+fi
+printf '%s\n' "${GPU_BENCH_OUTPUT}" | head -n 1 | grep -q "mode"
+GPU_ROWS="$(printf '%s\n' "${GPU_BENCH_OUTPUT}" | grep -E '^(baseline|optimized)[[:space:]]+1024' | wc -l | tr -d ' ')"
+if [[ "${GPU_ROWS}" -lt 2 ]]; then
+  echo "Expected baseline and optimized GPU benchmark rows, got ${GPU_ROWS}." >&2
+  exit 1
+fi
 
 section "Pass-analysis shape smoke"
 BENCH_OUTPUT="$("${BENCH}" --shapes="${SHAPES}")"

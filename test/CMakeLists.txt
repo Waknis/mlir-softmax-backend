@@ -65,3 +65,11 @@ add_test(
     ${PROJECT_SOURCE_DIR}/tests/test_benchmark_shapes.sh
     $<TARGET_FILE:mlc-pass-analysis>
 )
+
+add_test(
+  NAME mlc-gpu-runtime-bench-smoke
+  COMMAND ${BASH_EXE}
+    ${PROJECT_SOURCE_DIR}/tests/test_gpu_runtime_bench.sh
+    $<TARGET_FILE:mlc-gpu-bench>
+    ${CMAKE_CURRENT_BINARY_DIR}/gpu_runtime_bench
+)

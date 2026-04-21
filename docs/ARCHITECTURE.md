@@ -19,9 +19,11 @@ CUDA Driver API.
   LLVM IR, injects the CUDA kernel wrapper, and emits PTX with `llc`.
 - `runtime/`: C++ CUDA Driver API wrapper. It dynamically loads
   `libcuda.so`, loads generated PTX, manages device buffers, launches the
-  generated kernel, and copies results back for verification.
+  generated kernel, times repeated launches for benchmarking, and copies
+  results back for verification.
 - `tools/`: native CLIs. `mlc-opt` runs the pass, `mlc-driver` emits all
-  compiler artifacts, `mlc-demo` launches generated PTX, and
+  compiler artifacts, `mlc-demo` launches generated PTX,
+  `mlc-gpu-bench` reports runtime kernel throughput, and
   `mlc-pass-analysis` reports compile-time pass effects.
 
 ## Current Scope
@@ -40,5 +42,5 @@ GPU-parallel row reductions is future work.
 - `test/`: FileCheck and CTest coverage for native MLIR behavior.
 - `tests/`: shell and C++ integration checks driven by CTest.
 - `scripts/verify_wsl_gpu.sh`: local GPU verification gate covering CMake,
-  CTest, driver artifacts, `mlc-demo --verify`, and the pass-analysis shape
-  smoke test.
+  CTest, driver artifacts, `mlc-demo --verify`, the generated-PTX GPU
+  benchmark smoke test, and the pass-analysis shape smoke test.
